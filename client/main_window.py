@@ -1,12 +1,7 @@
 
 from PySide6.QtWidgets import (
-    QMainWindow,
-    QWidget,
-    QVBoxLayout,
-    QLabel,
-    QLineEdit,
-    QPushButton,
-    QTextEdit,
+    QMainWindow, QWidget, QVBoxLayout, QLabel,
+    QLineEdit, QPushButton, QTextEdit
 )
 
 from server.orchestrator import process_command
@@ -17,7 +12,7 @@ class MainWindow(QMainWindow):
         super().__init__()
 
         self.setWindowTitle("CodeAssist AI")
-        self.resize(850, 600)
+        self.resize(900, 750)
 
         central_widget = QWidget()
         layout = QVBoxLayout(central_widget)
@@ -26,41 +21,64 @@ class MainWindow(QMainWindow):
         title.setStyleSheet("font-size: 26px; font-weight: bold;")
 
         description = QLabel(
-            "Your voice-controlled programming assistant"
+            "Your AI programming assistant"
         )
 
         self.command_input = QLineEdit()
         self.command_input.setPlaceholderText(
-            "Enter a programming command..."
+            "Example: Find errors in my Python code"
         )
 
-        self.submit_button = QPushButton("Submit Command")
+        code_label = QLabel("Paste your code here:")
+
+        self.code_input = QTextEdit()
+        self.code_input.setPlaceholderText(
+            "Paste your Python code here..."
+        )
+        self.code_input.setMinimumHeight(220)
+
+        self.submit_button = QPushButton("Analyze Command")
         self.submit_button.clicked.connect(self.handle_command)
 
         self.results = QTextEdit()
         self.results.setReadOnly(True)
         self.results.setPlaceholderText(
-            "Agent responses will appear here."
+            "Agent results will appear here..."
         )
 
         layout.addWidget(title)
         layout.addWidget(description)
         layout.addWidget(self.command_input)
+        layout.addWidget(code_label)
+        layout.addWidget(self.code_input)
         layout.addWidget(self.submit_button)
+        layout.addWidget(QLabel("Results:"))
         layout.addWidget(self.results)
 
         self.setCentralWidget(central_widget)
 
     def handle_command(self):
         command = self.command_input.text().strip()
+        code = self.code_input.toPlainText()
 
         if not command:
-            self.results.append("Please enter a command.")
+            self.results.setPlainText(
+                "Please enter a programming command."
+            )
             return
 
-        self.results.append(f"\nYou: {command}")
+        self.submit_button.setEnabled(False)
+        self.results.setPlainText(
+            "CodeAssist AI is processing your request...\n"
+            "Please wait."
+        )
 
-        response = process_command(command)
-        self.results.append(f"CodeAssist AI: {response}")
-
-        self.command_input.clear()
+        try:
+            result = process_command(command, code)
+            self.results.setPlainText(result)
+        except Exception as error:
+            self.results.setPlainText(
+                f"An error occurred:\n{error}"
+            )
+        finally:
+            self.submit_button.setEnabled(True)

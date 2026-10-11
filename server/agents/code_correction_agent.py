@@ -5,28 +5,36 @@ from server.services.llm_service import ask_ai
 def correct_code(code: str, errors: str) -> dict:
     """Generate corrected code and explain the changes."""
 
+    
     prompt = f"""
 You are the Code Correction Agent in CodeAssist AI.
 
-Fix the reported errors in the supplied Python code.
+Fix the actual errors in the supplied Python code.
 
 Rules:
 1. Preserve the original program's intended behavior.
-2. Fix reported errors and avoid unrelated changes.
-3. Return the complete corrected Python code.
-4. Do not claim the code was tested or executed.
-5. Separate your response into these sections:
+2. Use the detected errors as the primary guide.
+3. Explain only changes that were actually necessary.
+4. Do not invent errors.
+5. Do not say indentation was wrong unless the original
+   code actually had an indentation error.
+6. Do not describe blank lines as errors unless they cause
+   a real problem.
+7. Return the complete corrected Python code.
+8. Do not claim that the code was executed or tested.
+
+Use exactly this format:
 
 CORRECTED_CODE:
-Provide the complete corrected code inside a Python code block.
+[Python code inside a Python code block]
 
 EXPLANATION:
-Briefly explain the changes.
+[State the exact error and how it was fixed.]
 
-ORIGINAL CODE:
+Original code:
 {code}
 
-DETECTED ERRORS:
+Detected errors:
 {errors}
 """
 
