@@ -80,6 +80,7 @@ def listen_once(timeout_seconds: int = 8) -> str:
             audio_path = Path(temp_dir) / "command.wav"
 
             with wave.open(str(audio_path), "wb") as wav_file:
+                
                 wav_file.setnchannels(1)
                 wav_file.setsampwidth(2)
                 wav_file.setframerate(SAMPLE_RATE)
