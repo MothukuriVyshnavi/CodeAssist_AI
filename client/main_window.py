@@ -43,7 +43,6 @@ def _response_to_text(response: Any) -> str:
 
 def _extract_corrected_code(response_text: str) -> str:
     """Find code explicitly marked as corrected by the correction agent."""
-    # Preferred format: CORRECTED_CODE: followed by a fenced code block.
     marker = re.search(r"CORRECTED_CODE\s*:?", response_text, re.IGNORECASE)
     if marker:
         following_text = response_text[marker.end():]
@@ -52,7 +51,11 @@ def _extract_corrected_code(response_text: str) -> str:
             return fenced.group(1).strip("\n")
 
     # Compatible with the earlier output format used by this project.
-    section = re.search(r"CODE CORRECTION AGENT\s*:?(.*)", response_text, re.IGNORECASE | re.DOTALL)
+    section = re.search(
+        r"CODE CORRECTION AGENT\s*:?(.*)",
+        response_text,
+        re.IGNORECASE | re.DOTALL,
+    )
     if section:
         fenced = re.search(r"```[^\n`]*\n(.*?)```", section.group(1), re.DOTALL)
         if fenced:
@@ -81,7 +84,7 @@ def _approval_decision(recognized_text: str) -> str:
     def contains_phrase(phrase: str) -> bool:
         return re.search(r"\b" + re.escape(phrase) + r"\b", text) is not None
 
-    # Check rejection first so a phrase such as "no, don't apply" cannot pass.
+    # Check rejection first so "no, don't apply" cannot pass.
     if any(contains_phrase(phrase) for phrase in reject_phrases):
         return "reject"
     if any(contains_phrase(phrase) for phrase in apply_phrases):
@@ -125,8 +128,8 @@ class ScreenVoiceWorker(QThread):
             print(f"[CodeAssist] OCR failed: {error}", flush=True)
 
         try:
-            # Load the model before recording so model startup time does not
-            # consume the user's speaking time.
+            # Load the model before recording so startup time does not consume
+            # the user's speaking time.
             print("[CodeAssist] Loading Whisper model...", flush=True)
             load_whisper_model()
             speak(
@@ -138,7 +141,9 @@ class ScreenVoiceWorker(QThread):
             command = (listen_once(timeout_seconds=12) or "").strip()
             print(f"[CodeAssist] Recognized command: {command!r}", flush=True)
             if not command:
-                issues.append("No command was recognized. Check the microphone and try again.")
+                issues.append(
+                    "No command was recognized. Check the microphone and try again."
+                )
         except Exception as error:
             issues.append(f"Voice recognition failed: {error}")
             print(f"[CodeAssist] Voice recognition failed: {error}", flush=True)
@@ -194,9 +199,29 @@ class ApprovalWorker(QThread):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("CodeAssist - Desktop Programming Assistant")
-        self.resize(900, 760)
-        self.setMinimumSize(700, 600)
+        self.setWindowTitle("CodeAssist")
+        self.resize(320, 650)
+        self.setMinimumSize(300, 400)
+        screen = QApplication.primaryScreen()
+        if screen is not None:
+            area = screen.availableGeometry()
+            sidebar_width = 320
+            sidebar_height = 650
+
+        self.setGeometry(
+            area.right() - sidebar_width + 1,
+            area.bottom() - sidebar_height + 1,
+            sidebar_width,
+            sidebar_height,
+        )
+
+        self.setWindowFlags(
+            Qt.WindowType.Window
+        | Qt.WindowType.WindowStaysOnTopHint
+        )
+
+
+        self._position_main_window_on_right()
 
         self._screen_worker = None
         self._analysis_worker = None
@@ -207,55 +232,82 @@ class MainWindow(QMainWindow):
         self._build_interface()
         self._build_floating_icon()
 
+    
+    def _position_main_window_on_right(self) -> None:
+        screen = QApplication.primaryScreen()
+        if screen is None:
+            return
+
+        area = screen.availableGeometry()
+
+        width = 320
+        height = 650
+
+        x = area.right() - width + 1
+        y = area.bottom() - height + 1
+
+        self.setGeometry(x, y, width, height)
+
+
     # ------------------------------ Main UI ------------------------------
 
     def _build_interface(self) -> None:
         central = QWidget(self)
         layout = QVBoxLayout(central)
-        layout.setContentsMargins(22, 18, 22, 18)
-        layout.setSpacing(10)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(6)
 
         title = QLabel("CodeAssist")
         title.setObjectName("pageTitle")
-        subtitle = QLabel(
-            "A desktop programming assistant for screen capture, voice commands, "
-            "error detection, and code correction."
-        )
-        subtitle.setWordWrap(True)
-        subtitle.setObjectName("subtitle")
 
-        command_label = QLabel("Command")
+        subtitle = QLabel("Your floating coding assistant")
+        subtitle.setObjectName("subtitle")
+        subtitle.setWordWrap(True)
+
+        command_label = QLabel("Voice / Text Command")
         self.command_input = QLineEdit()
         self.command_input.setPlaceholderText(
-            "Example: Find syntax errors and explain how to fix them"
+            "e.g. Find syntax errors"
         )
-        self.command_input.returnPressed.connect(lambda: self.start_analysis())
+        self.command_input.returnPressed.connect(
+            lambda: self.start_analysis()
+        )
 
-        code_label = QLabel("Code / OCR text")
+        code_label = QLabel("Code / OCR Text")
         self.code_input = QTextEdit()
         self.code_input.setPlaceholderText(
-            "Paste code here, or click the floating microphone to capture the screen..."
+            "Paste code here or capture your screen..."
         )
-        self.code_input.setMinimumHeight(190)
+        self.code_input.setMinimumHeight(90)
 
         buttons = QHBoxLayout()
-        buttons.setSpacing(10)
-        self.analyze_button = QPushButton("Analyze Command")
-        self.analyze_button.clicked.connect(lambda: self.start_analysis())
-        self.capture_button = QPushButton("Capture Screen + Voice")
-        self.capture_button.clicked.connect(lambda: self.start_screen_voice())
+        buttons.setSpacing(6)
+
+        self.analyze_button = QPushButton("Analyze")
+        self.analyze_button.clicked.connect(
+            lambda: self.start_analysis()
+        )
+
+        self.capture_button = QPushButton("Capture + Voice")
+        self.capture_button.clicked.connect(
+            lambda: self.start_screen_voice()
+        )
+
         buttons.addWidget(self.analyze_button)
         buttons.addWidget(self.capture_button)
 
-        self.status_label = QLabel("Ready. Click the floating microphone or enter a command.")
+        self.status_label = QLabel("Ready")
         self.status_label.setObjectName("statusLabel")
         self.status_label.setWordWrap(True)
+        self.status_label.setMaximumHeight(42)
 
         output_label = QLabel("Results")
         self.output_box = QTextEdit()
         self.output_box.setReadOnly(True)
-        self.output_box.setPlaceholderText("Analysis results and detected issues will appear here.")
-        self.output_box.setMinimumHeight(180)
+        self.output_box.setPlaceholderText(
+            "Errors and corrections appear here..."
+        )
+        self.output_box.setMinimumHeight(100)
 
         layout.addWidget(title)
         layout.addWidget(subtitle)
@@ -269,60 +321,67 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.output_box, 2)
 
         self.setCentralWidget(central)
-        self.setStyleSheet(
-            """
+
+        self.setStyleSheet("""
             QMainWindow, QWidget {
                 background-color: #101321;
                 color: #F4F6FF;
-                font-size: 10pt;
+                font-size: 9pt;
             }
+
             QLabel#pageTitle {
                 color: #FFFFFF;
-                font-size: 24pt;
+                font-size: 17pt;
                 font-weight: 700;
             }
+
             QLabel#subtitle {
                 color: #B8BED6;
-                padding-bottom: 5px;
+                padding-bottom: 2px;
             }
+
             QLineEdit, QTextEdit {
                 background-color: #191E31;
                 color: #F4F6FF;
                 border: 1px solid #343B59;
-                border-radius: 8px;
-                padding: 9px;
+                border-radius: 7px;
+                padding: 6px;
                 selection-background-color: #6856D9;
             }
+
             QPushButton {
                 background-color: #6856D9;
                 color: white;
                 border: none;
-                border-radius: 8px;
-                padding: 10px 15px;
+                border-radius: 7px;
+                padding: 7px 5px;
                 font-weight: 600;
             }
+
             QPushButton:hover {
                 background-color: #7969E5;
             }
+
             QPushButton:disabled {
                 background-color: #41465C;
                 color: #B2B5C5;
             }
+
             QLabel#statusLabel {
                 color: #AEB8FF;
-                padding: 4px 0;
+                padding: 2px 0;
             }
-            """
-        )
+        """)
+
 
     # -------------------------- Floating microphone -----------------------
 
     def _build_floating_icon(self) -> None:
-        # A parentless tool window remains visible when the main window is
-        # hidden so CodeAssist can capture the IDE behind it.
         self.floating_button = QToolButton()
         self.floating_button.setWindowTitle("CodeAssist microphone")
-        self.floating_button.setToolTip("CodeAssist: capture screen and speak a command")
+        self.floating_button.setToolTip(
+            "CodeAssist: capture screen and speak a command"
+        )
         self.floating_button.setFixedSize(50, 50)
         self.floating_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.floating_button.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -332,8 +391,7 @@ class MainWindow(QMainWindow):
         self.floating_button.setMask(
             QRegion(0, 0, 50, 50, QRegion.RegionType.Ellipse)
         )
-        self.floating_button.setStyleSheet(
-            """
+        self.floating_button.setStyleSheet("""
             QToolButton {
                 background-color: #6255DC;
                 border: 2px solid #A5A0FF;
@@ -347,8 +405,7 @@ class MainWindow(QMainWindow):
             QToolButton:pressed {
                 background-color: #493BB8;
             }
-            """
-        )
+        """)
 
         shadow = QGraphicsDropShadowEffect(self.floating_button)
         shadow.setBlurRadius(24)
@@ -374,13 +431,17 @@ class MainWindow(QMainWindow):
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         white = QColor("#FFFFFF")
-        painter.setPen(QPen(white, 2.6, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+        painter.setPen(
+            QPen(
+                white,
+                2.6,
+                Qt.PenStyle.SolidLine,
+                Qt.PenCapStyle.RoundCap,
+                Qt.PenJoinStyle.RoundJoin,
+            )
+        )
         painter.setBrush(white)
-
-        # Microphone capsule
         painter.drawRoundedRect(17, 5, 14, 22, 7, 7)
-
-        # U-shaped support, stem and base
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawArc(11, 12, 26, 24, 0, -180 * 16)
         painter.drawLine(24, 35, 24, 40)
@@ -395,7 +456,6 @@ class MainWindow(QMainWindow):
         area = screen.availableGeometry()
         size = self.floating_button.width() if hasattr(self, "floating_button") else 50
         x = area.right() - size - 12 + 1
-        # Place it around three-quarters of the way down the screen.
         y = area.top() + int((area.height() - size) * 0.72)
         self.floating_button.move(x, y)
 
@@ -411,20 +471,21 @@ class MainWindow(QMainWindow):
             return
         if self._worker_is_running(self._analysis_worker):
             self.status_label.setText("Please wait for the current analysis to finish.")
+            self.show()
             return
         if self._worker_is_running(self._approval_worker):
             self.status_label.setText("Waiting for your spoken approval. Say APPLY or CANCEL.")
+            self.show()
             return
 
-        self.status_label.setText("Capturing the screen, reading visible text, and listening...")
+        self.status_label.setText(
+            "Capturing the screen, reading visible text, and listening..."
+        )
         self.output_box.setPlainText(
             "SCREEN CAPTURE + VOICE\n\n"
-            "The main window will briefly hide so CodeAssist can capture the app behind it. "
-            "The round microphone icon will remain visible.\n"
+            "The main window will briefly hide so CodeAssist can capture the app "
+            "behind it. The round microphone icon will remain visible.\n"
         )
-
-        # Hide only the main window. The independent floating microphone stays
-        # on screen; the short delay lets the IDE behind this window become visible.
         self.hide()
         QTimer.singleShot(350, self._launch_screen_voice_worker)
 
@@ -436,8 +497,9 @@ class MainWindow(QMainWindow):
         self._screen_worker.start()
 
     def handle_screen_captured(self, screenshot_path: str) -> None:
-        self.status_label.setText("Screenshot captured. Reading the screen and listening for your command...")
-        # Restore the results window after the desktop screenshot has been taken.
+        self.status_label.setText(
+            "Screenshot captured. Reading the screen and listening for your command..."
+        )
         self.show()
         self.raise_()
         self.activateWindow()
@@ -457,10 +519,11 @@ class MainWindow(QMainWindow):
     ) -> None:
         command = (command or "").strip()
         extracted_text = (extracted_text or "").strip()
-        existing_code = self.code_input.toPlainText().strip()
 
         if extracted_text:
             self.code_input.setPlainText(extracted_text)
+        if command:
+            self.command_input.setText(command)
 
         parts = [
             "SCREEN CAPTURE",
@@ -470,32 +533,38 @@ class MainWindow(QMainWindow):
             command if command else "No command was recognized.",
             "",
             "OCR RESULT",
-            f"Extracted {len(extracted_text)} characters." if extracted_text else "No readable text was extracted.",
+            (
+                f"Extracted {len(extracted_text)} characters."
+                if extracted_text
+                else "No readable text was extracted."
+            ),
         ]
         if issues:
             parts.extend(["", "NOTES", issues])
         if extracted_text:
             parts.extend([
                 "",
-                "Review the extracted text in the code area and correct any OCR mistakes before analysis.",
+                "IMPORTANT: Review the extracted text in the code area.",
+                "Correct any OCR mistakes before clicking Analyze.",
+                "CodeAssist will not start analysis automatically.",
             ])
 
         self.output_box.setPlainText("\n".join(parts))
-
-        if command:
-            self.command_input.setText(command)
-            code_to_analyze = extracted_text or existing_code
-            if code_to_analyze:
-                self.status_label.setText("Voice command recognized. Starting analysis...")
-                self.start_analysis(command=command, code=code_to_analyze)
-                return
-            self.status_label.setText("Command recognized, but no code was found. Paste code to analyze it.")
-        else:
-            self.status_label.setText("Screen capture finished. Enter a command manually if voice recognition failed.")
-
         self.set_controls_enabled(True)
         self.show()
+        self.raise_()
+        self.activateWindow()
         self.show_floating_icon()
+
+        if extracted_text:
+            self.status_label.setText(
+                "Screen captured. Review the code and command, then click Analyze."
+            )
+        else:
+            self.status_label.setText(
+                "Screen capture finished, but no readable code was extracted. "
+                "Paste your code or try capturing again."
+            )
 
     def handle_screen_voice_failed(self, error_message: str) -> None:
         self.output_box.append("\n\nERROR\n" + error_message)
@@ -514,11 +583,19 @@ class MainWindow(QMainWindow):
             self.status_label.setText("Please respond to the correction approval first.")
             return
 
-        command_text = (command if command is not None else self.command_input.text()).strip()
-        code_text = (code if code is not None else self.code_input.toPlainText()).strip()
+        command_text = (
+            command if command is not None else self.command_input.text()
+        ).strip()
+        code_text = (
+            code if code is not None else self.code_input.toPlainText()
+        ).strip()
 
         if not command_text:
-            QMessageBox.information(self, "Command required", "Enter or say what you want CodeAssist to do.")
+            QMessageBox.information(
+                self,
+                "Command required",
+                "Enter or say what you want CodeAssist to do.",
+            )
             return
 
         if code is not None:
@@ -542,7 +619,9 @@ class MainWindow(QMainWindow):
 
         if corrected_code:
             self._pending_corrected_code = corrected_code
-            self.status_label.setText("Correction found. Waiting for your spoken approval: say APPLY or CANCEL.")
+            self.status_label.setText(
+                "Correction found. Waiting for your spoken approval: say APPLY or CANCEL."
+            )
             self.output_box.append(
                 "\n\nSPOKEN APPROVAL REQUIRED\n"
                 "CodeAssist will not change the code area unless you say APPLY or YES. "
@@ -553,55 +632,108 @@ class MainWindow(QMainWindow):
             self._approval_worker.failed.connect(self.handle_approval_failed)
             self._approval_worker.start()
         else:
-            self.status_label.setText("Analysis complete. No explicitly marked corrected code was found.")
+            self.status_label.setText(
+                "Analysis complete. No explicitly marked corrected code was found."
+            )
 
     def handle_analysis_failed(self, error_message: str) -> None:
         self.output_box.append("\n\n" + error_message)
-        self.status_label.setText("Analysis failed. Check the server/agent output in the terminal.")
+        self.status_label.setText(
+            "Analysis failed. Check the server/agent output in the terminal."
+        )
         self.set_controls_enabled(True)
 
     # --------------------------- Spoken approval --------------------------
 
-    def handle_approval_result(self, decision: str, recognized_text: str) -> None:
+    def handle_approval_result(
+        self,
+        decision: str,
+        recognized_text: str,
+    ) -> None:
         if decision == "apply" and self._pending_corrected_code:
-            self.code_input.setPlainText(self._pending_corrected_code)
-            self.output_box.append(
-                "\nVOICE APPROVAL: ACCEPTED\n"
-                f"Recognized: {recognized_text or '(not available)'}\n"
-                "The corrected code has been loaded into the CodeAssist code area. "
-                "It has NOT been automatically written to your IDE or another file."
-            )
-            self.status_label.setText("Correction accepted and loaded into the CodeAssist code area.")
-        elif decision == "reject":
-            self.output_box.append(
-                "\nVOICE APPROVAL: REJECTED\n"
-                f"Recognized: {recognized_text or '(not available)'}\n"
-                "The original code was left unchanged."
-            )
-            self.status_label.setText("Correction rejected. Original code remains unchanged.")
-        else:
-            self.output_box.append(
-                "\nVOICE APPROVAL: NOT RECOGNIZED\n"
-                f"Recognized: {recognized_text or '(no speech recognized)'}\n"
-                "For safety, the correction was NOT applied. Click Analyze Command again to retry."
-            )
-            self.status_label.setText("No clear approval was recognized. Original code remains unchanged.")
+            self.apply_pending_correction()
+            return
 
+        if decision == "reject":
+            self.reject_pending_correction(
+                f"Recognized: {recognized_text or '(not available)'}"
+            )
+            return
+
+        answer = QMessageBox.question(
+            self,
+            "Confirm Code Correction",
+            "Voice approval was not clearly recognized.\n\n"
+            "Do you want to apply the proposed correction to the CodeAssist "
+            "code area?\n\nChoose No to keep the original code.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer == QMessageBox.StandardButton.Yes:
+            self.apply_pending_correction()
+        else:
+            self.reject_pending_correction(
+                "Manual approval was declined or cancelled."
+            )
+
+    def handle_approval_failed(self, error_message: str) -> None:
+        self.output_box.append(
+            "\n\nVOICE APPROVAL FAILED\n"
+            f"{error_message}\n"
+            "Please confirm manually."
+        )
+        answer = QMessageBox.question(
+            self,
+            "Confirm Code Correction",
+            "Voice approval failed.\n\n"
+            "Do you want to apply the proposed correction to the CodeAssist "
+            "code area?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer == QMessageBox.StandardButton.Yes:
+            self.apply_pending_correction()
+        else:
+            self.reject_pending_correction(
+                "Manual approval was declined or cancelled."
+            )
+
+    def apply_pending_correction(self) -> None:
+        if not self._pending_corrected_code:
+            self.status_label.setText("No correction is waiting for approval.")
+            return
+
+        self.code_input.setPlainText(self._pending_corrected_code)
+        self.output_box.append(
+            "\n\nCORRECTION ACCEPTED\n"
+            "The corrected code has been loaded into the CodeAssist code area. "
+            "It has NOT been automatically written to your IDE or another file."
+        )
+        self.status_label.setText(
+            "Correction accepted and loaded into CodeAssist."
+        )
         self._pending_corrected_code = ""
         self.set_controls_enabled(True)
         self.show()
         self.raise_()
+        self.activateWindow()
         self.show_floating_icon()
 
-    def handle_approval_failed(self, error_message: str) -> None:
+    def reject_pending_correction(self, reason: str = "") -> None:
         self.output_box.append(
-            "\nVOICE APPROVAL FAILED\n"
-            f"{error_message}\n"
-            "The correction was not applied; the original code remains unchanged."
+            "\n\nCORRECTION REJECTED\n"
+            f"{reason}\n"
+            "The original code was left unchanged."
         )
-        self.status_label.setText("Approval recording failed. The original code remains unchanged.")
+        self.status_label.setText(
+            "Correction rejected. Original code remains unchanged."
+        )
         self._pending_corrected_code = ""
         self.set_controls_enabled(True)
+        self.show()
+        self.raise_()
+        self.activateWindow()
+        self.show_floating_icon()
 
     # ------------------------------- Helpers ------------------------------
 
@@ -612,8 +744,7 @@ class MainWindow(QMainWindow):
     def set_controls_enabled(self, enabled: bool) -> None:
         self.analyze_button.setEnabled(enabled)
         self.capture_button.setEnabled(enabled)
-        # Keep the floating microphone visible and clickable. The method
-        # checks worker state and ignores duplicate requests while busy.
+        # Keep the floating microphone visible and clickable.
         self.floating_button.setEnabled(True)
 
     def showEvent(self, event) -> None:
@@ -623,14 +754,19 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event) -> None:
         running_workers = [
             worker
-            for worker in (self._screen_worker, self._analysis_worker, self._approval_worker)
+            for worker in (
+                self._screen_worker,
+                self._analysis_worker,
+                self._approval_worker,
+            )
             if worker is not None and worker.isRunning()
         ]
         if running_workers:
             QMessageBox.warning(
                 self,
                 "CodeAssist is busy",
-                "Please wait for the current screen capture, analysis, or voice approval to finish before closing CodeAssist.",
+                "Please wait for the current screen capture, analysis, or voice "
+                "approval to finish before closing CodeAssist.",
             )
             event.ignore()
             return
