@@ -6,16 +6,13 @@ from pathlib import Path
 
 import pytesseract
 from mss import MSS
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, ImageFilter
 
 
-# Approximate editor area for a typical Cursor layout.
-# Values are proportions of the screenshot:
+# Approximate Cursor editor area, expressed as proportions:
 # left, top, right, bottom.
-#
-# This excludes most of the sidebar and bottom terminal.
-# Set CODEASSIST_OCR_CROP=full to process the entire screen.
-EDITOR_CROP = (0.17, 0.08, 0.99, 0.73)
+# You can override these values using environment variables.
+EDITOR_CROP = (0.20, 0.10, 0.99, 0.60)
 
 
 def capture_screen() -> str:
@@ -40,7 +37,8 @@ def capture_screen() -> str:
 
     print(f"[Screen] Screenshot saved: {screenshot_path}", flush=True)
     print(
-        f"[Screen] Screenshot dimensions: {image.width}x{image.height}",
+        f"[Screen] Screenshot dimensions: "
+        f"{image.width}x{image.height}",
         flush=True,
     )
 
@@ -65,16 +63,25 @@ def configure_tesseract() -> None:
 
 
 def crop_editor_area(image: Image.Image) -> Image.Image:
-    """Crop to the approximate code editor area."""
+    """Crop the approximate editor area from the screenshot."""
 
-    crop_setting = os.getenv("CODEASSIST_OCR_CROP", "editor").lower()
+    crop_setting = os.getenv(
+        "CODEASSIST_OCR_CROP",
+        "editor",
+    ).strip().lower()
 
     if crop_setting == "full":
         print("[OCR] Using the full screenshot.", flush=True)
-        return image
+        return image.copy()
+
+    if crop_setting != "editor":
+        print(
+            f"[OCR] Unknown crop setting {crop_setting!r}; "
+            "using the editor crop.",
+            flush=True,
+        )
 
     left_ratio, top_ratio, right_ratio, bottom_ratio = EDITOR_CROP
-
     width, height = image.size
 
     left = int(width * left_ratio)
@@ -82,7 +89,6 @@ def crop_editor_area(image: Image.Image) -> Image.Image:
     right = int(width * right_ratio)
     bottom = int(height * bottom_ratio)
 
-    # Keep the crop within the screenshot boundaries.
     left = max(0, min(left, width - 1))
     top = max(0, min(top, height - 1))
     right = max(left + 1, min(right, width))
@@ -99,8 +105,27 @@ def crop_editor_area(image: Image.Image) -> Image.Image:
     return cropped
 
 
+def preprocess_for_code(image: Image.Image) -> Image.Image:
+    """Enlarge and improve contrast while retaining code characters."""
+
+    # Convert to grayscale and improve contrast.
+    image = ImageOps.grayscale(image)
+    image = ImageOps.autocontrast(image)
+
+    # Enlarge small code text.
+    image = image.resize(
+        (image.width * 2, image.height * 2),
+        Image.Resampling.LANCZOS,
+    )
+
+    # Slightly sharpen glyph edges without binarizing the image.
+    image = image.filter(ImageFilter.SHARPEN)
+
+    return image
+
+
 def extract_text_from_screen(screenshot_path: str) -> str:
-    """Extract visible text from the screenshot using OCR."""
+    """Extract code-like text from the captured screen using Tesseract."""
 
     configure_tesseract()
 
@@ -108,14 +133,11 @@ def extract_text_from_screen(screenshot_path: str) -> str:
         with Image.open(screenshot_path) as original:
             image = original.convert("RGB")
             image = crop_editor_area(image)
+            image = preprocess_for_code(image)
 
-            # Improve contrast and enlarge small editor text.
-            image = ImageOps.autocontrast(image.convert("L"))
-            image = image.resize(
-                (image.width * 2, image.height * 2),
-                Image.Resampling.LANCZOS,
-            )
-
+            # PSM 6 assumes a block of text. Preserve spaces where possible.
+            # These settings help with source-code-like text, but cannot
+            # guarantee correct punctuation or indentation.
             extracted_text = pytesseract.image_to_string(
                 image,
                 lang="eng",
@@ -145,7 +167,7 @@ def extract_text_from_screen(screenshot_path: str) -> str:
 
     if extracted_text:
         print("[OCR] Extracted text preview:", flush=True)
-        print(extracted_text[:1000], flush=True)
+        print(extracted_text[:1500], flush=True)
     else:
         print("[OCR] No text was detected.", flush=True)
 
