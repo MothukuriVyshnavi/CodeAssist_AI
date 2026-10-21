@@ -21,7 +21,8 @@ from PySide6.QtWidgets import (
 )
 
 from server.orchestrator import process_command
-from server.services.screen_service import capture_screen, extract_text_from_screen
+from server.services.screen_service import capture_screen
+from server.services.code_extractor import extract_code_with_fallback
 from server.services.speech_service import speak
 from server.services.voice_service import listen_once, load_whisper_model
 
@@ -157,7 +158,7 @@ class ScreenVoiceWorker(QThread):
             return
 
         try:
-            extracted_text = extract_text_from_screen(screenshot_path) or ""
+            extracted_text = extract_code_with_fallback(screenshot_path) or ""
 
             print(
                 f"[CodeAssist] OCR extracted "
