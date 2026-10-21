@@ -145,23 +145,27 @@ class ScreenVoiceWorker(QThread):
     completed = Signal(str, str, str, str)
     failed = Signal(str)
 
+    
     def run(self) -> None:
-        screenshot_path = ""
+        screen_image = None
+        capture_description = "Screen captured in memory (not saved)"
         extracted_text = ""
         command = ""
         issues = []
 
         try:
-            print("[CodeAssist] Capturing screen...", flush=True)
-            screenshot_path = str(capture_screen())
-            self.screenshot_ready.emit(screenshot_path)
+            print("[CodeAssist] Capturing screen in memory...", flush=True)
+            screen_image = capture_screen_image()
+            self.screenshot_ready.emit(capture_description)
 
         except Exception as error:
             self.failed.emit(f"Screen capture failed: {error}")
             return
 
         try:
-            extracted_text = extract_code_with_fallback(screenshot_path) or ""
+            extracted_text = extract_code_with_fallback(
+                screen_image=screen_image
+            ) or ""
 
             print(
                 f"[CodeAssist] Source extracted "
@@ -170,8 +174,11 @@ class ScreenVoiceWorker(QThread):
             )
 
         except Exception as error:
-            issues.append(f"OCR failed: {error}")
-            print(f"[CodeAssist] OCR failed: {error}", flush=True)
+            issues.append(f"Code extraction failed: {error}")
+            print(
+                f"[CodeAssist] Code extraction failed: {error}",
+                flush=True,
+            )
 
         try:
             print("[CodeAssist] Loading Whisper model...", flush=True)
@@ -212,9 +219,10 @@ class ScreenVoiceWorker(QThread):
         self.completed.emit(
             command,
             extracted_text,
-            screenshot_path,
+            capture_description,
             "\n".join(issues),
         )
+
 
 
 class AnalysisWorker(QThread):
@@ -661,12 +669,12 @@ class MainWindow(QMainWindow):
         self.show_floating_icon()
 
         self.status_label.setText(
-            "Screenshot captured. Reading the screen and listening..."
+            "Screen captured in memory. Reading code and listening..."
         )
 
         self.output_box.setPlainText(
             "SCREEN CAPTURE\n"
-            f"Screenshot: {screenshot_path}\n\n"
+            f"{screenshot_path}\n\n"
             "VOICE COMMAND\n"
             "Listening for your programming command..."
         )
@@ -689,7 +697,7 @@ class MainWindow(QMainWindow):
 
         parts = [
             "SCREEN CAPTURE",
-            f"Screenshot: {screenshot_path or 'Not available'}",
+            f"Capture: {screenshot_path or 'Not available'}",
             "",
             "VOICE COMMAND",
             command if command else "No command was recognized.",
