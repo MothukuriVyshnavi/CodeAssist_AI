@@ -1,4 +1,4 @@
-
+﻿
 import re
 import time
 from typing import Any
@@ -161,7 +161,7 @@ class ScreenVoiceWorker(QThread):
             extracted_text = extract_code_with_fallback(screenshot_path) or ""
 
             print(
-                f"[CodeAssist] OCR extracted "
+                f"[CodeAssist] Source extracted "
                 f"{len(extracted_text)} characters.",
                 flush=True,
             )
@@ -352,7 +352,9 @@ class MainWindow(QMainWindow):
         buttons.setSpacing(6)
 
         self.analyze_button = QPushButton("Analyze")
-        self.analyze_button.clicked.connect(self.start_analysis)
+        self.analyze_button.clicked.connect(
+            lambda checked=False: self.start_analysis()
+        )
 
         self.capture_button = QPushButton("Capture + Voice")
         self.capture_button.clicked.connect(self.start_screen_voice)
@@ -758,6 +760,13 @@ class MainWindow(QMainWindow):
             )
             return
 
+        # FIX: protect against Boolean arguments from Qt signals.
+        if not isinstance(command, str):
+            command = None
+
+        if not isinstance(code, str):
+            code = None
+
         command_text = (
             command
             if command is not None
@@ -1028,3 +1037,4 @@ class MainWindow(QMainWindow):
         self._allow_application_exit = True
         self.floating_button.close()
         QApplication.quit()
+

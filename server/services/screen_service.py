@@ -5,6 +5,11 @@ from datetime import datetime
 from pathlib import Path
 
 import pytesseract
+
+pytesseract.pytesseract.tesseract_cmd = (
+    r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+)
+
 from mss import MSS
 from PIL import Image, ImageOps, ImageFilter
 
