@@ -21,8 +21,11 @@ from PySide6.QtWidgets import (
 )
 
 from server.orchestrator import process_command
-from server.services.screen_service import capture_screen
+
+from server.services.screen_service import capture_screen_image
+
 from server.services.code_extractor import extract_code_with_fallback
+
 from server.services.speech_service import speak
 from server.services.voice_service import listen_once, load_whisper_model
 

@@ -19,6 +19,25 @@ from PIL import Image, ImageOps, ImageFilter
 # Adjust these values if the editor is positioned differently.
 EDITOR_CROP = (0.17, 0.08, 0.99, 0.73)
 
+def capture_screen_image() -> Image.Image:
+    """Capture the primary monitor and return the image in memory."""
+
+    with MSS() as screen:
+        screenshot = screen.grab(screen.primary_monitor)
+
+        image = Image.frombytes(
+            "RGB",
+            screenshot.size,
+            screenshot.rgb,
+        )
+
+    print(
+        f"[Screen] Captured in memory: "
+        f"{image.width}x{image.height}",
+        flush=True,
+    )
+
+    return image
 
 def capture_screen() -> str:
     """Capture the primary monitor and return the screenshot path."""
@@ -122,6 +141,46 @@ def preprocess_for_code(image: Image.Image) -> Image.Image:
 
     return image
 
+def extract_text_from_image(image: Image.Image) -> str:
+    """Extract visible editor text from an in-memory image using OCR."""
+
+    configure_tesseract()
+
+    try:
+        image = image.convert("RGB")
+        image = crop_editor_area(image)
+        image = preprocess_for_code(image)
+
+        extracted_text = pytesseract.image_to_string(
+            image,
+            lang="eng",
+            config=(
+                "--oem 3 --psm 6 "
+                "-c preserve_interword_spaces=1 "
+                "-c load_system_dawg=0 "
+                "-c load_freq_dawg=0"
+            ),
+        )
+
+    except pytesseract.TesseractNotFoundError as error:
+        raise RuntimeError(
+            "Tesseract OCR was not found. Check the installation "
+            "or set the TESSERACT_CMD environment variable."
+        ) from error
+
+    except Exception as error:
+        raise RuntimeError(
+            f"Could not extract screen text: {error}"
+        ) from error
+
+    extracted_text = extracted_text.strip()
+
+    print(
+        f"[OCR] Extracted {len(extracted_text)} characters from memory.",
+        flush=True,
+    )
+
+    return extracted_text
 
 def extract_text_from_screen(screenshot_path: str) -> str:
     """Extract visible editor text using Tesseract OCR."""

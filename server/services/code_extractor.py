@@ -4,10 +4,15 @@ import os
 import time
 from pathlib import Path
 
-from server.services.screen_service import extract_text_from_screen
+from PIL import Image
+
+from server.services.screen_service import (
+    extract_text_from_image,
+    extract_text_from_screen,
+)
 
 SNAPSHOT_PATH = (
-    Path(os.getenv("TEMP", ".")) 
+    Path(os.getenv("TEMP", "."))
     / "CodeAssistCaptures"
     / "cursor_editor.json"
 )
@@ -15,10 +20,15 @@ SNAPSHOT_PATH = (
 MAX_SNAPSHOT_AGE_SECONDS = 10
 
 
-def extract_code_with_fallback(screenshot_path: str) -> str:
+def extract_code_with_fallback(
+    screenshot_path: str = "",
+    screen_image: Image.Image | None = None,
+) -> str:
     """
-    Prefer exact source code from the Cursor extension.
-    If unavailable or stale, fall back to OCR.
+    Prefer exact source code from the Cursor editor bridge.
+    If unavailable or stale, use OCR on an in-memory image.
+    A screenshot path remains supported for backward compatibility.
+
     Set CODEASSIST_SOURCE=ocr to force OCR.
     """
     source_mode = os.getenv("CODEASSIST_SOURCE", "auto").strip().lower()
@@ -31,7 +41,9 @@ def extract_code_with_fallback(screenshot_path: str) -> str:
                 )
 
                 timestamp_ms = int(snapshot.get("timestamp_ms", 0))
-                age_seconds = (time.time() * 1000 - timestamp_ms) / 1000
+                age_seconds = (
+                    time.time() * 1000 - timestamp_ms
+                ) / 1000
 
                 text = snapshot.get("text", "")
                 language = snapshot.get("language_id", "unknown")
@@ -44,7 +56,8 @@ def extract_code_with_fallback(screenshot_path: str) -> str:
                 ):
                     print(
                         f"[CodeExtractor] Using Cursor code: "
-                        f"{file_name} ({language}), {len(text)} characters.",
+                        f"{file_name} ({language}), "
+                        f"{len(text)} characters.",
                         flush=True,
                     )
                     return text
@@ -56,13 +69,21 @@ def extract_code_with_fallback(screenshot_path: str) -> str:
 
         except (OSError, ValueError, TypeError) as error:
             print(
-                f"[CodeExtractor] Could not read Cursor snapshot: {error}",
+                f"[CodeExtractor] Could not read Cursor snapshot: "
+                f"{error}",
                 flush=True,
             )
 
     print("[CodeExtractor] Falling back to screen OCR.", flush=True)
 
-    if not screenshot_path:
-        return ""
+    if screen_image is not None:
+        return extract_text_from_image(screen_image) or ""
 
-    return extract_text_from_screen(screenshot_path) or ""
+    if screenshot_path:
+        return extract_text_from_screen(screenshot_path) or ""
+
+    print(
+        "[CodeExtractor] No screen image or screenshot path available.",
+        flush=True,
+    )
+    return ""
