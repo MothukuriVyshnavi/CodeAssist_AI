@@ -1,0 +1,19 @@
+
+{
+    "name": "codeassist-editor-bridge",
+    "displayName": "CodeAssist Editor Bridge",
+    "description": "Provides a read-only snapshot of the active editor document to CodeAssist.",
+    "version": "1.0.0",
+    "publisher": "codeassist-local",
+    "engines": {
+      "vscode": "^1.80.0"
+    },
+    "categories": [
+      "Other"
+    ],
+    "activationEvents": [
+      "*"
+    ],
+    "main": "./extension.js"
+  }
+  
