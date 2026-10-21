@@ -9,10 +9,10 @@ from mss import MSS
 from PIL import Image, ImageOps, ImageFilter
 
 
-# Approximate Cursor editor area, expressed as proportions:
-# left, top, right, bottom.
-# You can override these values using environment variables.
-EDITOR_CROP = (0.20, 0.10, 0.99, 0.60)
+# Approximate code-editor area for your 1920x1080 Cursor layout.
+# Format: left, top, right, bottom as proportions of the screen.
+# Adjust these values if the editor is positioned differently.
+EDITOR_CROP = (0.17, 0.08, 0.99, 0.73)
 
 
 def capture_screen() -> str:
@@ -46,7 +46,7 @@ def capture_screen() -> str:
 
 
 def configure_tesseract() -> None:
-    """Configure the Tesseract executable if its location is known."""
+    """Configure the Tesseract executable."""
 
     configured_path = os.getenv("TESSERACT_CMD")
 
@@ -63,23 +63,15 @@ def configure_tesseract() -> None:
 
 
 def crop_editor_area(image: Image.Image) -> Image.Image:
-    """Crop the approximate editor area from the screenshot."""
+    """Crop the approximate code-editor area."""
 
     crop_setting = os.getenv(
-        "CODEASSIST_OCR_CROP",
-        "editor",
-    ).strip().lower()
+        "CODEASSIST_OCR_CROP", "editor"
+    ).lower()
 
     if crop_setting == "full":
         print("[OCR] Using the full screenshot.", flush=True)
         return image.copy()
-
-    if crop_setting != "editor":
-        print(
-            f"[OCR] Unknown crop setting {crop_setting!r}; "
-            "using the editor crop.",
-            flush=True,
-        )
 
     left_ratio, top_ratio, right_ratio, bottom_ratio = EDITOR_CROP
     width, height = image.size
@@ -106,26 +98,28 @@ def crop_editor_area(image: Image.Image) -> Image.Image:
 
 
 def preprocess_for_code(image: Image.Image) -> Image.Image:
-    """Enlarge and improve contrast while retaining code characters."""
+    """Improve contrast and readability of code text."""
 
-    # Convert to grayscale and improve contrast.
+    # Convert to grayscale.
     image = ImageOps.grayscale(image)
+
+    # Improve contrast.
     image = ImageOps.autocontrast(image)
 
-    # Enlarge small code text.
+    # Enlarge small editor text.
     image = image.resize(
-        (image.width * 2, image.height * 2),
+        (image.width * 3, image.height * 3),
         Image.Resampling.LANCZOS,
     )
 
-    # Slightly sharpen glyph edges without binarizing the image.
+    # Sharpen character edges.
     image = image.filter(ImageFilter.SHARPEN)
 
     return image
 
 
 def extract_text_from_screen(screenshot_path: str) -> str:
-    """Extract code-like text from the captured screen using Tesseract."""
+    """Extract visible editor text using Tesseract OCR."""
 
     configure_tesseract()
 
@@ -135,15 +129,14 @@ def extract_text_from_screen(screenshot_path: str) -> str:
             image = crop_editor_area(image)
             image = preprocess_for_code(image)
 
-            # PSM 6 assumes a block of text. Preserve spaces where possible.
-            # These settings help with source-code-like text, but cannot
-            # guarantee correct punctuation or indentation.
             extracted_text = pytesseract.image_to_string(
                 image,
                 lang="eng",
                 config=(
                     "--oem 3 --psm 6 "
-                    "-c preserve_interword_spaces=1"
+                    "-c preserve_interword_spaces=1 "
+                    "-c load_system_dawg=0 "
+                    "-c load_freq_dawg=0"
                 ),
             )
 
