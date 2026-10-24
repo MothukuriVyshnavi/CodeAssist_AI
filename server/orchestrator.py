@@ -19,65 +19,80 @@ def process_command(command: str, code: str = "") -> str:
         "",
     ]
 
-    # Tasks that require code
+    # Tasks that require source code
     if task in {"detect_errors", "correct_code", "explain_code"}:
         if not code.strip():
             return (
                 "\n".join(output)
-                + "Please paste your Python code into the code input area "
+                + "Please paste your code into the code input area "
                   "and submit your command again."
             )
 
     # Agent 2: Detect errors
     if task in {"detect_errors", "correct_code"}:
         detection = detect_errors(code)
+        language = detection.get("language", "unknown")
 
         output.extend([
             "ERROR DETECTION AGENT",
-            f"Syntax error: {detection['syntax_error'] or 'None detected'}",
+            f"Detected language: {language}",
+            f"Syntax error: {detection.get('syntax_error') or 'None detected'}",
             "Analysis:",
-            detection["analysis"],
+            detection.get("analysis", "No analysis was returned."),
             "",
         ])
 
         # Agent 3: Suggest corrections when explicitly requested,
-        # or when a syntax error is detected.
+        # or when the detection agent reports a syntax error.
         should_correct = (
             task == "correct_code"
-            or detection["has_syntax_error"]
+            or detection.get("has_syntax_error", False)
         )
 
         if should_correct:
             errors = (
-                detection["syntax_error"]
-                or detection["analysis"]
+                detection.get("syntax_error")
+                or detection.get("analysis", "Review the supplied code.")
             )
 
             correction = correct_code(code, errors)
 
             output.extend([
                 "CODE CORRECTION AGENT",
-                correction["correction"],
+                correction.get(
+                    "correction",
+                    "No correction suggestion was returned.",
+                ),
                 "",
                 "Note: Review the proposed correction before using it.",
             ])
 
         return "\n".join(output)
 
-    # Explain code without running error detection
+    # Explain code in its detected language
     if task == "explain_code":
+        detection = detect_errors(code)
+        language = detection.get("language", "unknown")
+
         explanation = ask_ai(
-            "Explain the following Python code in beginner-friendly terms. "
-            "Do not execute it.\n\n"
-            f"```python\n{code}\n```"
+            "You are a programming tutor. Explain the following "
+            f"{language} code in beginner-friendly terms. "
+            "Do not execute it or modify the original code. "
+            "If the language identification is uncertain, say so.\n\n"
+            f"```text\n{code}\n```"
         )
-        output.extend(["CODE EXPLANATION", explanation])
+
+        output.extend([
+            f"CODE EXPLANATION ({language})",
+            explanation,
+        ])
         return "\n".join(output)
 
     # Generate code or answer general programming questions
     response = ask_ai(
-        "You are CodeAssist AI, a programming assistant. "
-        "Answer clearly and do not claim to have executed code.\n\n"
+        "You are CodeAssist, a programming assistant supporting "
+        "Python, Java, C, C++, and SQL. Answer clearly and do not "
+        "claim to have executed code.\n\n"
         f"User request: {command}"
     )
 

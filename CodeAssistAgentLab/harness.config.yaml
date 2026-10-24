@@ -1,0 +1,85 @@
+# yaml-language-server: $schema=./.harness/schema/config.json
+#
+# Harness configuration.
+# Everything the roles share lives here; a role only declares what makes it different.
+
+project:
+  name: CodeAssistAgentLab
+  description: Application developed by the agent harness.
+
+defaults:
+  # Any role without an explicit `model:` inherits this one.
+  model: default
+  temperature: 0.2
+  permission:
+    edit: allow
+    # `ask` is fine when you drive opencode by hand, but it blocks a headless run:
+    # pipeline roles override it explicitly.
+    bash: ask
+    webfetch: allow
+
+# Aliases: a role points at `default` or at one of the aliases below.
+# Swapping a model everywhere is a one-line change here.
+# `opencode models` lists the ids your providers actually expose.
+models:
+  default: ollama/qwen2.5-coder:1.5b
+paths:
+  roles: ./roles
+  pipelines: ./pipelines
+  evals: ./evals
+  memory: ./memory
+  artifacts: ./.harness/runs
+  state: ./.harness/state.json
+  prompts: ./.opencode/prompt
+  opencodeConfig: ./opencode.json
+
+opencode:
+  binary: "C:/Users/jahna/AppData/Roaming/npm/node_modules/opencode-ai/bin/opencode.exe"
+  # Appended to every `opencode run` invocation.
+  args: []
+  env: {}
+
+# Project memory: markdown files, read and written by the agents themselves.
+memory:
+  enabled: true
+  index: MEMORY.md
+  # Past this, `harness memory` asks you to merge entries: a memory nobody reads is
+  # not a memory.
+  maxEntries: 50
+
+# Self-improvement: who may rewrite what, and under which condition.
+improve:
+  role: improver
+  scope:
+    - roles/
+    - memory/
+  # Refuses to "improve" without a measurement to compare against. Setting this to false
+  # means accepting prompt changes you cannot evaluate.
+  requireBaseline: true
+
+# Extra instruction files, merged into every opencode session.
+# AGENTS.md is NOT listed here: opencode loads it from the project root on its own, and
+# listing it would send it twice.
+instructions:
+  - memory/MEMORY.md
+
+# Local / OpenAI-compatible provider, passed through verbatim to opencode.json.
+# Every model used has to be declared here or opencode will not resolve it.
+provider:
+  ollama:
+    npm: "@ai-sdk/openai-compatible"
+    name: Ollama (local)
+    options:
+      baseURL: http://localhost:11434/v1
+    models:
+      qwen2.5-coder:1.5b:
+        name: qwen2.5-coder:1.5b
+
+# MCP servers, passed through verbatim to opencode.json.
+mcp: {}
+
+run:
+  # How many steps of a pipeline may run at the same time.
+  concurrency: 2
+  # 30 minutes per step.
+  timeoutMs: 1800000

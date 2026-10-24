@@ -1,0 +1,17 @@
+{
+  "files": {
+    ".opencode\\prompt\\architect.md": "e09dd261b7634da95464ae2298cb65decde7500cf1065e429e299e8154d839d2",
+    ".opencode\\prompt\\codeassist-supervisor.md": "1ff0c2270f3a6491d93336f9778b8c44cff321f0bf5df3657a70963f96920e0a",
+    ".opencode\\prompt\\developer.md": "f352160ed5530405d2550427a768cef18e5caea6791699ea5e3083f3de11ca0f",
+    ".opencode\\prompt\\improver.md": "99d5cea22777d1c3cf6d994db22f212dd0a8ef9b124ebc80803067c8e564fb2b",
+    ".opencode\\prompt\\judge.md": "3588d0170e39b436dd1fc6bf01329b94ce5b9ea855c7a41ed87a41083bee7693",
+    ".opencode\\prompt\\lead.md": "7691d78b55581625686879a59ed8472a08cb707f31e281ccd5b15f434425e786",
+    ".opencode\\prompt\\reviewer.md": "a9777fcda5ba42c087695b4662c22e254e80f7226ae44b4c161cdc8b7cd837d5",
+    ".opencode\\prompt\\tester.md": "7864b7bc1250993334a9fdc1807cbf2624e6435e5a77728b19fc989d12e1901e",
+    "opencode.json": "1fc9198175f5531d032eb7d3769a0bd1affbd5cb5d446c9b9842cee93f391e40",
+    ".harness\\schema\\role.json": "860d2881f2e9429f7b30813c19e6660936ff633f4cd62c5d875a94b2bd6832a9",
+    ".harness\\schema\\pipeline.json": "c170c1400217dd4f2af8be7265eca3d87e63c719a1659d52c87bcac8681c27ad",
+    ".harness\\schema\\eval.json": "135a9ca11b2d43adc47d6933ddb9151868d7204f881ee3c4d244266d1bed1980",
+    ".harness\\schema\\config.json": "b3ba3178054641b5c61182ca5e86266acce13d2a8b7aae514b02ec99aa4c2c85"
+  }
+}

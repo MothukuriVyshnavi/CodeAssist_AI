@@ -238,7 +238,57 @@ class AnalysisWorker(QThread):
 
     def run(self) -> None:
         try:
-            response = process_command(self.command, self.code)
+            import json
+            import os
+            import subprocess
+            import sys
+            from pathlib import Path
+
+            project_root = Path(__file__).resolve().parents[1]
+            adapter_path = (
+                project_root
+                / "CodeAssistAgentLab"
+                / "codeassist_adapter.py"
+            )
+
+            if not adapter_path.is_file():
+                raise FileNotFoundError(
+                    f"Harness adapter not found: {adapter_path}"
+                )
+
+            request = json.dumps({
+                "command": self.command,
+                "code": self.code,
+            })
+
+            environment = os.environ.copy()
+            completed = subprocess.run(
+                [sys.executable, str(adapter_path)],
+                input=request,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=240,
+                cwd=str(project_root),
+                env=environment,
+                check=False,
+            )
+
+            if completed.returncode != 0:
+                detail = completed.stderr.strip() or completed.stdout.strip()
+                raise RuntimeError(
+                    detail or
+                    f"Adapter exited with code {completed.returncode}."
+                )
+
+            payload = json.loads(completed.stdout)
+            if not payload.get("ok"):
+                raise RuntimeError(
+                    payload.get("error", "The adapter reported an error.")
+                )
+
+            response = payload.get("result", "")
             response_text = _response_to_text(response)
             corrected_code = _extract_corrected_code(response_text)
 

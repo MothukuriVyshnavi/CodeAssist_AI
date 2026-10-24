@@ -1,0 +1,4 @@
+﻿{
+  "command": "Find errors in this Python code",
+  "code": "def add(a, b)\n    return a + b\n"
+}

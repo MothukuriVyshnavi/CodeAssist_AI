@@ -1,0 +1,148 @@
+{
+    "$schema":  "https://opencode.ai/config.json",
+    "model":  "ollama/qwen2.5-coder:1.5b",
+    "instructions":  [
+                         "memory/MEMORY.md"
+                     ],
+    "permission":  {
+                       "edit":  "allow",
+                       "webfetch":  "allow",
+                       "bash":  "ask"
+                   },
+    "provider":  {
+                     "ollama":  {
+                                    "npm":  "@ai-sdk/openai-compatible",
+                                    "name":  "Ollama (local)",
+                                    "options":  {
+                                                    "baseURL":  "http://localhost:11434/v1"
+                                                },
+                                    "models":  {
+                                                   "qwen2.5-coder:1.5b":  {
+                                                                              "name":  "qwen2.5-coder:1.5b"
+                                                                          }
+                                               }
+                                }
+                 },
+    "agent":  {
+                  "architect":  {
+                                    "description":  "Turns a feature request into a concrete technical design. Never writes application code.",
+                                    "mode":  "all",
+                                    "model":  "ollama/qwen2.5-coder:1.5b",
+                                    "prompt":  "{file:./.opencode/prompt/architect.md}",
+                                    "temperature":  0.1,
+                                    "tools":  {
+                                                  "bash":  false,
+                                                  "patch":  false
+                                              },
+                                    "permission":  {
+                                                       "edit":  "allow",
+                                                       "webfetch":  "allow",
+                                                       "bash":  "deny"
+                                                   }
+                                },
+                  "codeassist-supervisor":  {
+                                                "description":  "Supervises the existing CodeAssist Python agents through the adapter.",
+                                                "mode":  "primary",
+                                                "model":  "ollama/qwen2.5-coder:1.5b",
+                                                "prompt":  "{file:./.opencode/prompt/codeassist-supervisor.md}",
+                                                "temperature":  0.1,
+                                                "tools":  {
+                                                              "bash":  true,
+                                                              "edit":  false,
+                                                              "write":  false,
+                                                              "patch":  false
+                                                          },
+                                                "permission":  {
+                                                                   "edit":  "deny",
+                                                                   "webfetch":  "allow",
+                                                                   "bash":  "allow"
+                                                               }
+                                            },
+                  "developer":  {
+                                    "description":  "Implements the design in the codebase and keeps the build green.",
+                                    "mode":  "all",
+                                    "model":  "ollama/qwen2.5-coder:1.5b",
+                                    "prompt":  "{file:./.opencode/prompt/developer.md}",
+                                    "temperature":  0.1,
+                                    "permission":  {
+                                                       "edit":  "allow",
+                                                       "webfetch":  "allow",
+                                                       "bash":  "allow"
+                                                   }
+                                },
+                  "improver":  {
+                                   "description":  "Reads run and eval traces, and fixes the prompts of the roles that fail.",
+                                   "mode":  "all",
+                                   "model":  "ollama/qwen2.5-coder:1.5b",
+                                   "prompt":  "{file:./.opencode/prompt/improver.md}",
+                                   "temperature":  0,
+                                   "permission":  {
+                                                      "edit":  "allow",
+                                                      "webfetch":  "allow",
+                                                      "bash":  "allow"
+                                                  }
+                               },
+                  "judge":  {
+                                "description":  "Judges the outcome of an eval against one criterion and returns a binary verdict.",
+                                "mode":  "all",
+                                "model":  "ollama/qwen2.5-coder:1.5b",
+                                "prompt":  "{file:./.opencode/prompt/judge.md}",
+                                "temperature":  0,
+                                "tools":  {
+                                              "edit":  false,
+                                              "write":  false,
+                                              "patch":  false,
+                                              "webfetch":  false
+                                          },
+                                "permission":  {
+                                                   "edit":  "deny",
+                                                   "webfetch":  "allow",
+                                                   "bash":  "allow"
+                                               }
+                            },
+                  "lead":  {
+                               "description":  "Interactive entry point. Frames the work and delegates to the specialists.",
+                               "mode":  "primary",
+                               "model":  "ollama/qwen2.5-coder:1.5b",
+                               "prompt":  "{file:./.opencode/prompt/lead.md}",
+                               "temperature":  0.2,
+                               "permission":  {
+                                                  "edit":  "allow",
+                                                  "webfetch":  "allow",
+                                                  "bash":  "allow"
+                                              }
+                           },
+                  "reviewer":  {
+                                   "description":  "Reviews the working-tree changes for correctness and fit. Reports; does not fix.",
+                                   "mode":  "all",
+                                   "model":  "ollama/qwen2.5-coder:1.5b",
+                                   "prompt":  "{file:./.opencode/prompt/reviewer.md}",
+                                   "temperature":  0,
+                                   "tools":  {
+                                                 "edit":  false,
+                                                 "patch":  false,
+                                                 "write":  true
+                                             },
+                                   "permission":  {
+                                                      "edit":  "allow",
+                                                      "webfetch":  "allow",
+                                                      "bash":  "allow"
+                                                  }
+                               },
+                  "tester":  {
+                                 "description":  "Writes and runs tests against the implemented feature, then reports what actually failed.",
+                                 "mode":  "all",
+                                 "model":  "ollama/qwen2.5-coder:1.5b",
+                                 "prompt":  "{file:./.opencode/prompt/tester.md}",
+                                 "temperature":  0.1,
+                                 "permission":  {
+                                                    "edit":  "allow",
+                                                    "webfetch":  "allow",
+                                                    "bash":  "allow"
+                                                }
+                             }
+              },
+    "plugin":  [
+                   "C:/Users/jahna/OneDrive/Desktop/CodeAssist_AI/CodeAssistAgentLab/.opencode/plugins/codeassist.js"
+               ]
+}

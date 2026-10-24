@@ -1,0 +1,22 @@
+# yaml-language-server: $schema=../.harness/schema/eval.json
+description: Evaluate the CodeAssist agents and their orchestrated workflow.
+
+pipeline: codeassist-evaluation
+
+inputs:
+  task: >-
+    Evaluate the existing CodeAssist agents and verify that the adapter invokes
+    the existing orchestrator and returns a proposed correction.
+
+assert:
+  - type: command
+    run: '"C:\Users\jahna\OneDrive\Desktop\CodeAssist_AI\.venv\Scripts\python.exe" "C:\Users\jahna\OneDrive\Desktop\CodeAssist_AI\CodeAssistAgentLab\codeassist_agent_eval.py"'
+    expectExit: 0
+    description: all three individual CodeAssist agent checks pass
+    weight: 3
+
+  - type: command
+    run: '"C:\Users\jahna\OneDrive\Desktop\CodeAssist_AI\.venv\Scripts\python.exe" "C:\Users\jahna\OneDrive\Desktop\CodeAssist_AI\CodeAssistAgentLab\codeassist_adapter_eval.py"'
+    expectExit: 0
+    description: adapter invokes the orchestrator and proposes a correction
+    weight: 4

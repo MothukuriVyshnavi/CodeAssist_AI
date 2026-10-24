@@ -1,0 +1,39 @@
+
+# yaml-language-server: $schema=../.harness/schema/pipeline.json
+description: Run deterministic evaluations of the existing CodeAssist agents and adapter.
+
+inputs:
+  - name: task
+    description: Evaluation scenario description.
+    required: true
+
+steps:
+  - id: evaluate-individual-agents
+    role: tester
+    prompt: |
+      Evaluate the existing CodeAssist agents.
+
+      Scenario:
+      {{ input.task }}
+
+      Run this deterministic evaluation command using the bash tool:
+      "C:/Users/jahna/OneDrive/Desktop/CodeAssist_AI/.venv/Scripts/python.exe" "C:/Users/jahna/OneDrive/Desktop/CodeAssist_AI/CodeAssistAgentLab/codeassist_agent_eval.py"
+
+      Report the actual command output and exit code.
+      Do not claim success unless the command really ran.
+      Do not modify any files.
+
+  - id: evaluate-adapter
+    role: tester
+    prompt: |
+      Evaluate the existing CodeAssist adapter and orchestrator integration.
+
+      Scenario:
+      {{ input.task }}
+
+      Run this deterministic evaluation command using the bash tool:
+      "C:/Users/jahna/OneDrive/Desktop/CodeAssist_AI/.venv/Scripts/python.exe" "C:/Users/jahna/OneDrive/Desktop/CodeAssist_AI/CodeAssistAgentLab/codeassist_adapter_eval.py"
+
+      Report the actual command output and exit code.
+      Do not claim success unless the command really ran.
+      Do not modify any files.
