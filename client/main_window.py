@@ -48,10 +48,18 @@ def _response_to_text(response: Any) -> str:
     return str(response)
 
 
-def _extract_corrected_code(response_text: str) -> str:
-    """Find code explicitly marked as corrected by the correction agent."""
-    marker = re.search(r"CORRECTED_CODE\s*:?", response_text, re.IGNORECASE)
 
+def _extract_corrected_code(response_text: str) -> str:
+    """Extract proposed corrected code from supported orchestrator formats."""
+    if not response_text:
+        return ""
+
+    # Format 1: explicit CORRECTED_CODE marker followed by a fenced block.
+    marker = re.search(
+        r"CORRECTED_CODE\s*:?",
+        response_text,
+        re.IGNORECASE,
+    )
     if marker:
         following_text = response_text[marker.end():]
         fenced = re.search(
@@ -62,12 +70,12 @@ def _extract_corrected_code(response_text: str) -> str:
         if fenced:
             return fenced.group(1).strip("\n")
 
+    # Format 2: CODE CORRECTION AGENT section with a fenced code block.
     section = re.search(
         r"CODE CORRECTION AGENT\s*:?(.*)",
         response_text,
         re.IGNORECASE | re.DOTALL,
     )
-
     if section:
         fenced = re.search(
             r"```[^\n`]*\n(.*?)```",
@@ -77,7 +85,29 @@ def _extract_corrected_code(response_text: str) -> str:
         if fenced:
             return fenced.group(1).strip("\n")
 
+    # Format 3: orchestrator's "Proposed corrected code:" section.
+    proposed = re.search(
+        r"Proposed corrected code\s*:\s*\n(.*?)(?=\n\s*Explanation\s*:|\n\s*Note\s*:|\Z)",
+        response_text,
+        re.IGNORECASE | re.DOTALL,
+    )
+    if proposed:
+        candidate = proposed.group(1).strip()
+
+        # Also support a fenced block inside this section.
+        fenced = re.search(
+            r"```[^\n`]*\n(.*?)```",
+            candidate,
+            re.DOTALL,
+        )
+        if fenced:
+            return fenced.group(1).strip("\n")
+
+        if candidate and "No corrected code could be extracted." not in candidate:
+            return candidate
+
     return ""
+
 
 
 def _approval_decision(recognized_text: str) -> str:

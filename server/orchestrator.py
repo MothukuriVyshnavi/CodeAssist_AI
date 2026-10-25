@@ -47,25 +47,40 @@ def process_command(command: str, code: str = "") -> str:
         should_correct = (
             task == "correct_code"
             or detection.get("has_syntax_error", False)
+            or detection.get("has_errors", False)
         )
 
+        
         if should_correct:
+            # Pass all detected findings to the correction agent.
+            findings = detection.get("findings", {})
             errors = (
-                detection.get("syntax_error")
-                or detection.get("analysis", "Review the supplied code.")
+                f"Detected language: {language}\n"
+                f"Findings: {findings}\n"
+                f"Analysis: {detection.get('analysis', '')}"
             )
 
-            correction = correct_code(code, errors)
+            correction = correct_code(
+                code,
+                errors,
+                language=language,
+            )
 
             output.extend([
                 "CODE CORRECTION AGENT",
-                correction.get(
-                    "correction",
-                    "No correction suggestion was returned.",
-                ),
+                f"Correction generated: {correction.get('success', False)}",
+                f"Language: {correction.get('language', language)}",
                 "",
-                "Note: Review the proposed correction before using it.",
+                "Proposed corrected code:",
+                correction.get("corrected_code") or
+                "No corrected code could be extracted.",
+                "",
+                "Explanation:",
+                correction.get("explanation", ""),
+                "",
+                "Note: This is a proposal. Review and approve it before applying.",
             ])
+
 
         return "\n".join(output)
 
