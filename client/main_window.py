@@ -511,7 +511,7 @@ class MainWindow(QMainWindow):
         self.floating_button.setToolTip(
             "CodeAssist: click to capture the screen and speak a command"
         )
-        self.floating_button.setFixedSize(50, 50)
+        self.floating_button.setFixedSize(36, 36)
         self.floating_button.setFocusPolicy(
             Qt.FocusPolicy.NoFocus
         )
@@ -522,14 +522,11 @@ class MainWindow(QMainWindow):
         self.floating_button.setIcon(
             QIcon(self._create_mic_icon())
         )
-        self.floating_button.setIconSize(QSize(30, 30))
+        self.floating_button.setIconSize(QSize(22, 22))
 
         self.floating_button.setMask(
             QRegion(
-                0,
-                0,
-                50,
-                50,
+                0, 0, 36, 36,
                 QRegion.RegionType.Ellipse,
             )
         )
@@ -537,14 +534,14 @@ class MainWindow(QMainWindow):
         self.floating_button.setStyleSheet("""
             QToolButton {
                 background-color: #6255DC;
-                border: 2px solid #A5A0FF;
-                border-radius: 25px;
+                border: 1px solid #A5A0FF;
+                border-radius: 18px;
                 padding: 0px;
             }
 
             QToolButton:hover {
                 background-color: #786BFA;
-                border: 2px solid #FFFFFF;
+                border: 1px solid #FFFFFF;
             }
 
             QToolButton:pressed {
@@ -610,14 +607,13 @@ class MainWindow(QMainWindow):
 
     def position_floating_button(self) -> None:
         screen = QApplication.primaryScreen()
-
-        if screen is None or not hasattr(self, "floating_button"):
+        if screen is None:
             return
 
         area = screen.availableGeometry()
-        size = 50
+        size = self.floating_button.sizeHint().width()
 
-        x = area.right() - size - 12 + 1
+        x = area.right() - size -10
         y = area.top() + int((area.height() - size) * 0.72)
 
         self.floating_button.move(x, y)
