@@ -13,10 +13,10 @@ def detect_language(code: str) -> str:
     if not text:
         return "unknown"
 
-        # SQL — also recognize common misspellings such as SELEC.
+        # SQL indicators, including incomplete SELECT statements.
     if (
         re.search(
-            r"\b(SELECT|SELEC)\b[\s\S]*\bFROM\b",
+            r"^\s*(SELECT|SELEC)\b",
             text,
             re.IGNORECASE,
         )
@@ -169,12 +169,87 @@ def validate_cpp_basics(code: str) -> str | None:
 
     return None
 
+def validate_balanced_delimiters(code: str, language: str) -> str | None:
+    """Detect unmatched brackets and braces in C-family code."""
+    pairs = {")": "(", "]": "[", "}": "{"}
+    opening = set(pairs.values())
+    stack = []
+    quote = None
+    escaped = False
+    line_comment = False
+    block_comment = False
 
+    i = 0
+    while i < len(code):
+        char = code[i]
+        next_char = code[i + 1] if i + 1 < len(code) else ""
+
+        if line_comment:
+            if char == "\n":
+                line_comment = False
+            i += 1
+            continue
+
+        if block_comment:
+            if char == "*" and next_char == "/":
+                block_comment = False
+                i += 2
+                continue
+            i += 1
+            continue
+
+        if quote:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = None
+            i += 1
+            continue
+
+        if char == "/" and next_char == "/":
+            line_comment = True
+            i += 2
+            continue
+        if char == "/" and next_char == "*":
+            block_comment = True
+            i += 2
+            continue
+        if char in ("'", '"'):
+            quote = char
+        elif char in opening:
+            stack.append(char)
+        elif char in pairs:
+            if not stack or stack[-1] != pairs[char]:
+                return f"Possible {language} syntax error: unmatched '{char}'."
+            stack.pop()
+
+        i += 1
+
+    if stack:
+        return (
+            f"Possible {language} syntax error: "
+            f"missing closing delimiter for '{stack[-1]}'."
+        )
+
+    return None
 
 def detect_errors(code: str) -> dict:
     """Validate Python syntax and analyze code in its likely language."""
 
     language = detect_language(code)
+
+    if language in ("Java", "C", "C++"):
+        delimiter_error = validate_balanced_delimiters(code, language)
+        if delimiter_error:
+            return {
+                "language": language,
+                "has_syntax_error": True,
+                "syntax_error": delimiter_error,
+                "analysis": delimiter_error,
+            }
+
     if language == "SQL":
         sql_error = validate_sql_basics(code)
         if sql_error:
