@@ -33,10 +33,34 @@ def process_command(command: str, code: str = "") -> str:
         detection = detect_errors(code)
         language = detection.get("language", "unknown")
 
+        findings = detection.get("findings", {})
+
+        error_categories = [
+            "syntax_errors",
+            "undefined_names",
+            "type_errors",
+            "runtime_errors",
+        ]
+
+        warning_categories = [
+            "logical_bugs",
+        ]
+
+        error_count = sum(
+            len(findings.get(category, []))
+            for category in error_categories
+        )
+
+        warning_count = sum(
+        len(findings.get(category, []))
+            for category in warning_categories
+        )
+
         output.extend([
             "ERROR DETECTION AGENT",
             f"Detected language: {language}",
-            f"Syntax error: {detection.get('syntax_error') or 'None detected'}",
+            f"Error Count: {error_count}",
+            f"Warning Count: {warning_count}",
             "Analysis:",
             detection.get("analysis", "No analysis was returned."),
             "",

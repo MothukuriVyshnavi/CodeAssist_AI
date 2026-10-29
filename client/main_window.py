@@ -7,6 +7,7 @@ from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap, QRegion
 from PySide6.QtWidgets import (
     QApplication,
     QGraphicsDropShadowEffect,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -169,11 +170,12 @@ def _approval_decision(recognized_text: str) -> str:
 
 class ScreenVoiceWorker(QThread):
     """Capture the desktop, extract visible text, and record a command."""
-
+    
     screenshot_ready = Signal(str)
     completed = Signal(str, str, str, str)
+    listening_started = Signal()
     failed = Signal(str)
-
+    listening_started = Signal()
     
     def run(self) -> None:
         screen_image = None
@@ -225,8 +227,10 @@ class ScreenVoiceWorker(QThread):
                 flush=True,
             )
 
-            command = (listen_once(timeout_seconds=12) or "").strip()
-
+            command = self.listen_for_command()
+            def listen_for_command(self):
+                self.listening_started.emit()
+                return (listen_once(timeout_seconds=12) or "").strip()
             print(
                 f"[CodeAssist] Recognized command: {command!r}",
                 flush=True,
@@ -237,6 +241,7 @@ class ScreenVoiceWorker(QThread):
                     "No command was recognized. "
                     "Check the microphone and try again."
                 )
+
 
         except Exception as error:
             issues.append(f"Voice recognition failed: {error}")
@@ -356,6 +361,35 @@ class ApprovalWorker(QThread):
         except Exception as error:
             self.failed.emit(str(error))
 
+class DraggableHeader(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._drag_offset = None
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_offset = (
+                event.globalPosition().toPoint()
+                - self.window().frameGeometry().topLeft()
+            )
+
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if (
+            self._drag_offset is not None
+            and event.buttons() & Qt.MouseButton.LeftButton
+        ):
+            self.window().move(
+                event.globalPosition().toPoint()
+                - self._drag_offset
+            )
+
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        self._drag_offset = None
+        super().mouseReleaseEvent(event)
 
 # ---------------------------------------------------------------------------
 # Main window
@@ -367,11 +401,12 @@ class MainWindow(QMainWindow):
         super().__init__()
 
         self.setWindowTitle("CodeAssist")
-        self.resize(320, 650)
-        self.setMinimumSize(300, 400)
+        self.resize(320, 670)
+        self.setMinimumSize(300, 420)
 
         self.setWindowFlags(
             Qt.WindowType.Window
+            | Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint
         )
 
@@ -399,7 +434,7 @@ class MainWindow(QMainWindow):
         area = screen.availableGeometry()
 
         width = 320
-        height = min(650, area.height())
+        height = min(670, area.height())
 
         x = area.right() - width + 1
         y = area.bottom() - height + 1
@@ -415,20 +450,105 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(6)
 
-        title = QLabel("CodeAssist")
-        title.setObjectName("pageTitle")
+        # Custom top header
+        header = DraggableHeader()
+        header.setObjectName("appHeader")
 
-        subtitle = QLabel("Your floating coding assistant")
-        subtitle.setObjectName("subtitle")
-        subtitle.setWordWrap(True)
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(4, 0, 0, 2)
+        header_layout.setSpacing(8)
+
+        # Purple microphone icon
+        mic_icon = QLabel()
+        mic_icon.setPixmap(self._create_header_mic_icon())
+        mic_icon.setFixedSize(22, 24)
+        mic_icon.setPixmap(
+            self._create_header_mic_icon().scaled(
+                24, 24,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        )
+
+        # Application title
+        title = QLabel("CodeAssist")
+        title.setObjectName("headerTitle")
+
+        # Minimize button
+        self.minimize_button = QToolButton()
+        self.minimize_button.setText("−")
+        self.minimize_button.setObjectName("windowButton")
+        self.minimize_button.setToolTip("Minimize")
+        self.minimize_button.clicked.connect(self.showMinimized)
+
+        # Close button
+        self.close_button = QToolButton()
+        self.close_button.setText("×")
+        self.close_button.setObjectName("closeButton")
+        self.close_button.setToolTip("Hide CodeAssist")
+        self.close_button.clicked.connect(self.close)
+
+        header_layout.addWidget(mic_icon)
+        header_layout.addWidget(title)
+        header_layout.addStretch()
+        header_layout.addWidget(self.minimize_button)
+        header_layout.addWidget(self.close_button)
+
+        # Thin divider below the header
+        header_divider = QFrame()
+        header_divider.setObjectName("headerDivider")
+        header_divider.setFrameShape(QFrame.Shape.HLine)
+        header_divider.setFixedHeight(1)
 
         command_label = QLabel("Voice / Text Command")
 
         self.command_input = QLineEdit()
         self.command_input.setPlaceholderText(
-            "e.g. Find syntax errors"
+            "Type a command or click the mic..."
         )
         self.command_input.returnPressed.connect(self.start_analysis)
+
+        # Command input with microphone button
+        command_row = QHBoxLayout()
+        command_row.setSpacing(6)
+
+        command_row.addWidget(self.command_input, 1)
+
+        self.command_mic_button = QToolButton()
+        self.command_mic_button.setFixedSize(30, 30)
+        self.command_mic_button.setIcon(
+            QIcon(self._create_mic_icon())
+        )
+        self.command_mic_button.setIconSize(QSize(16, 16))
+        self.command_mic_button.setToolTip("Capture screen and speak a command")
+        self.command_mic_button.setCursor(
+            Qt.CursorShape.PointingHandCursor
+        )
+        self.command_mic_button.setStyleSheet("""
+            QToolButton {
+                background-color: #2563EB;
+                color: white;
+                border: 1px solid #60A5FA;
+                border-radius: 6px;
+                padding: 2px;
+            }
+
+            QToolButton:hover {
+                background-color: #1D4ED8;
+            }
+
+            QToolButton:disabled {
+                background-color: #9CA3AF;
+                border: 1px solid #9CA3AF;
+            }
+        """)
+
+
+        self.command_mic_button.clicked.connect(
+            self.start_screen_voice
+        )
+        self.set_mic_state("idle")
+        command_row.addWidget(self.command_mic_button)
 
         code_label = QLabel("Code / OCR Text")
 
@@ -457,7 +577,41 @@ class MainWindow(QMainWindow):
         self.status_label.setWordWrap(True)
         self.status_label.setMaximumHeight(42)
 
-        output_label = QLabel("Results")
+        output_label = QLabel("Analysis Results")
+
+        # Error and Warning counts — equal width
+        counts_layout = QHBoxLayout()
+        counts_layout.setContentsMargins(0, 0, 0, 0)
+        counts_layout.setSpacing(6)
+
+        self.error_count_label = QLabel("0 Error")
+        self.error_count_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.error_count_label.setStyleSheet("""
+            QLabel {
+                background-color: #3B1D25;
+                color: #F87171;
+                border: 1px solid #7F3038;
+                border-radius: 6px;
+                padding: 7px;
+                font-weight: bold;
+            }
+        """)
+
+        self.warning_count_label = QLabel("0 Warnings")
+        self.warning_count_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.warning_count_label.setStyleSheet("""
+            QLabel {
+                background-color: #382D16;
+                color: #FBBF24;
+                border: 1px solid #806323;
+                border-radius: 6px;
+                padding: 7px;
+                font-weight: bold;
+            }
+        """)
+
+        counts_layout.addWidget(self.error_count_label, 1)
+        counts_layout.addWidget(self.warning_count_label, 1)
 
         self.output_box = QTextEdit()
         self.output_box.setReadOnly(True)
@@ -466,15 +620,16 @@ class MainWindow(QMainWindow):
         )
         self.output_box.setMinimumHeight(100)
 
-        layout.addWidget(title)
-        layout.addWidget(subtitle)
+        layout.addWidget(header)
+        layout.addWidget(header_divider)
         layout.addWidget(command_label)
-        layout.addWidget(self.command_input)
+        layout.addLayout(command_row)
         layout.addWidget(code_label)
         layout.addWidget(self.code_input, 2)
         layout.addLayout(buttons)
         layout.addWidget(self.status_label)
         layout.addWidget(output_label)
+        layout.addLayout(counts_layout)
         layout.addWidget(self.output_box, 2)
 
         self.setCentralWidget(central)
@@ -486,15 +641,44 @@ class MainWindow(QMainWindow):
                 font-size: 9pt;
             }
 
-            QLabel#pageTitle {
+            QWidget#appHeader {
+                background-color: #050505;
+            }
+
+            QLabel#headerTitle {
+                background-color: transparent;
                 color: #FFFFFF;
-                font-size: 17pt;
+                font-size: 10pt;
                 font-weight: 700;
             }
 
-            QLabel#subtitle {
-                color: #B8BED6;
-                padding-bottom: 2px;
+            QToolButton#windowButton,
+            QToolButton#closeButton {
+                background-color: transparent;
+                color: #B0B0B0;
+                border: none;
+                min-width: 18px;
+                max-width: 18px;
+                min-height: 18px;
+                max-height: 18px;
+                font-size: 14pt;
+                font-weight: 400;
+            }
+
+            QToolButton#windowButton:hover {
+                background-color: #292929;
+                border-radius: 5px;
+            }
+
+            QToolButton#closeButton:hover {
+                background-color: #C42B1C;
+                color: white;
+                border-radius: 5px;
+            }
+
+            QFrame#headerDivider {
+                background-color: #252525;
+                border: none;
             }
 
             QLineEdit, QTextEdit {
@@ -599,6 +783,23 @@ class MainWindow(QMainWindow):
         self.position_floating_button()
         self.floating_button.show()
         self.floating_button.raise_()
+    
+    def update_analysis_counts(self, result_text: str) -> None:
+        """Update error and warning counts from analysis output."""
+        import re
+
+        error_count = len(re.findall(
+            r"(?im)^\s*(?:error|errors)\s*[:\-]",
+            result_text
+        ))
+
+        warning_count = len(re.findall(
+            r"(?im)^\s*(?:warning|warnings)\s*[:\-]",
+            result_text
+        ))
+
+        self.error_count_label.setText(f"{error_count} Error")
+        self.warning_count_label.setText(f"{warning_count} Warnings")
 
     def _create_mic_icon(self) -> QPixmap:
         """Draw the white microphone symbol."""
@@ -630,6 +831,37 @@ class MainWindow(QMainWindow):
         painter.drawArc(11, 12, 26, 24, 0, -180 * 16)
         painter.drawLine(24, 35, 24, 40)
         painter.drawLine(17, 41, 31, 41)
+
+        painter.end()
+        return pixmap
+
+    def _create_header_mic_icon(self) -> QPixmap:
+        """Draw the purple microphone icon for the top header."""
+        pixmap = QPixmap(48, 48)
+        pixmap.fill(Qt.GlobalColor.transparent)
+
+        painter = QPainter(pixmap)
+        painter.setRenderHint(
+            QPainter.RenderHint.Antialiasing,
+            True,
+        )
+
+        painter.setPen(
+            QPen(
+                QColor("#8974F5"),
+                3.5,
+                Qt.PenStyle.SolidLine,
+                Qt.PenCapStyle.RoundCap,
+                Qt.PenJoinStyle.RoundJoin,
+            )
+        )
+
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+
+        painter.drawRoundedRect(18, 5, 12, 23, 6, 6)
+        painter.drawArc(11, 12, 26, 25, 0, -180 * 16)
+        painter.drawLine(24, 37, 24, 42)
+        painter.drawLine(17, 42, 31, 42)
 
         painter.end()
         return pixmap
@@ -677,6 +909,7 @@ class MainWindow(QMainWindow):
     # --------------------------- Screen + voice ----------------------------
 
     def start_screen_voice(self) -> None:
+        self.set_mic_state("listening")
         if self._worker_is_running(self._screen_worker):
             self.show_floating_icon()
             return
@@ -723,6 +956,9 @@ class MainWindow(QMainWindow):
             return
 
         self._screen_worker = ScreenVoiceWorker()
+        self._screen_worker.listening_started.connect(
+            lambda: self.set_mic_state("listening")
+        )
 
         self._screen_worker.screenshot_ready.connect(
             self.handle_screen_captured
@@ -817,6 +1053,7 @@ class MainWindow(QMainWindow):
             )
 
     def handle_screen_voice_failed(self, error_message: str) -> None:
+        self.set_mic_state("failed")
         self._capture_in_progress = False
 
         self.output_box.append(
@@ -837,6 +1074,7 @@ class MainWindow(QMainWindow):
         command: str = None,
         code: str = None,
     ) -> None:
+        self.set_mic_state("processing")
         if self._worker_is_running(self._analysis_worker):
             return
 
@@ -909,42 +1147,63 @@ class MainWindow(QMainWindow):
         self,
         result_text: str,
         corrected_code: str,
-    ) -> None:
-        self.output_box.setPlainText(
-            result_text or "The analysis returned no text."
-        )
+        ) -> None:
+            import re
 
-        self.set_controls_enabled(True)
+            self.set_mic_state("success")
 
-        if corrected_code:
-            self._pending_corrected_code = corrected_code
+            result_text = result_text or "The analysis returned no text."
+            self.output_box.setPlainText(result_text)
+            self.update_analysis_counts(result_text)
 
-            self.status_label.setText(
-                "Correction found. Waiting for spoken approval: "
-                "say APPLY or CANCEL."
+            error_match = re.search(
+                r"(?m)^Error Count:\s*(\d+)\s*$",
+                result_text,
             )
 
-            self.output_box.append(
-                "\n\nSPOKEN APPROVAL REQUIRED\n"
-                "CodeAssist will not change the code area unless you say "
-                "APPLY or YES. Say CANCEL or NO to keep the original code."
+            warning_match = re.search(
+                r"(?m)^Warning Count:\s*(\d+)\s*$",
+                result_text,
             )
 
-            self._approval_worker = ApprovalWorker()
+            error_count = int(error_match.group(1)) if error_match else 0
+            warning_count = int(warning_match.group(1)) if warning_match else 0
 
-            self._approval_worker.completed.connect(
-                self.handle_approval_result
-            )
-            self._approval_worker.failed.connect(
-                self.handle_approval_failed
-            )
+            self.error_count_label.setText(f"{error_count} Errors")
+            self.warning_count_label.setText(f"{warning_count} Warnings")
 
-            self._approval_worker.start()
+            self.set_controls_enabled(True)
 
-        else:
-            self.status_label.setText(
-                "Analysis complete. No explicitly marked corrected code was found."
-            )
+            if corrected_code:
+                self._pending_corrected_code = corrected_code
+
+                self.status_label.setText(
+                    "Correction found. Waiting for spoken approval: "
+                    "say APPLY or CANCEL."
+                )
+
+                self.output_box.append(
+                    "\n\nCORRECTED CODE\n"
+                    + corrected_code
+                    + "\n\nWaiting for your spoken approval to load the correction."
+                )
+
+
+                self._approval_worker = ApprovalWorker()
+
+                self._approval_worker.completed.connect(
+                    self.handle_approval_result
+                )
+                self._approval_worker.failed.connect(
+                    self.handle_approval_failed
+                )
+
+                self._approval_worker.start()
+
+            else:
+                self.status_label.setText(
+                    "Analysis complete. No explicitly marked corrected code was found."
+                )
 
     def handle_analysis_failed(self, error_message: str) -> None:
         self.output_box.append(
@@ -1070,13 +1329,41 @@ class MainWindow(QMainWindow):
     @staticmethod
     def _worker_is_running(worker) -> bool:
         return worker is not None and worker.isRunning()
-
     def set_controls_enabled(self, enabled: bool) -> None:
         self.analyze_button.setEnabled(enabled)
         self.capture_button.setEnabled(enabled)
-
+        self.command_mic_button.setEnabled(enabled)
         # The microphone remains available independently of sidebar controls.
         self.floating_button.setEnabled(True)
+    
+    def set_mic_state(self, state):
+        colors = {
+            "idle": "#7C3AED",       # Purple
+            "listening": "#DC2626",  # Red
+            "processing": "#2563EB", # Blue
+            "success": "#16A34A",    # Green
+            "failed": "#EA580C",     # Orange
+        }
+
+        color = colors.get(state, colors["idle"])
+
+        self.command_mic_button.setStyleSheet(f"""
+            QToolButton {{
+                background-color: {color};
+                color: white;
+                border: 1px solid {color};
+                border-radius: 6px;
+                padding: 2px;
+            }}
+            QToolButton:hover {{
+                border: 1px solid white;
+            }}
+            QToolButton:disabled {{
+                background-color: #6B7280;
+                border: 1px solid #6B7280;
+            }}
+        """)
+
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
