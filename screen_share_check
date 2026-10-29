@@ -1,7 +1,28 @@
-public class Main {
+import java.util.ArrayList;
+
+public class StudentManager {
     public static void main(String[] args) {
-        int a = 10
-        int b = 20;
-        System.out.println(a + b);
+        ArrayList<Integer> grades = new ArrayList<>();
+        
+        // Adding grades
+        grades.add(85);
+        grades.add(92);
+        grades.add(78);
+        grades.add(64);
+
+        System.out.println("Total students: " + grades.length()); 
+
+        int total = 0;
+        for (int i = 0; i <= grades.size(); i++) {
+            total += grades.get(i);
+        }
+        double average = total / grades.size();
+        System.out.println("Class Average: " + average);
+
+        if (average >= 70) {
+            System.out.println("Class performance: Passing");
+        } else {
+            System.out.println("Class performance: Needs Improvement");
+        }
     }
 }

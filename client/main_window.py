@@ -1,5 +1,4 @@
-﻿
-import re
+﻿import re
 import time
 from typing import Any
 
@@ -1124,4 +1123,3 @@ class MainWindow(QMainWindow):
         self._allow_application_exit = True
         self.floating_button.close()
         QApplication.quit()
-
