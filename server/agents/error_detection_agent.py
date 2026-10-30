@@ -8,6 +8,7 @@ import subprocess
 import symtable
 import sys
 import tempfile
+import shutil
 
 from server.services.llm_service import ask_ai
 
@@ -26,26 +27,35 @@ ERROR_CATEGORIES = (
 # ---------------------------------------------------------------------
 
 def deduplicate_undefined_names(items):
-    """Keep one diagnostic per undefined variable."""
-    result = []
-    seen_names = set()
+    """Remove duplicate reports for the same undefined variable."""
+
+    seen = set()
+    unique = []
 
     for item in items:
-        match = re.search(
-            r"(?:Name\s+['`\"]|Undefined name\s+[`'\"])([A-Za-z_]\w*)",
-            item,
-            re.IGNORECASE,
+        text = str(item)
+
+        match = (
+            re.search(r"\bName\s+['\"]([^'\"]+)['\"]", text, re.I)
+            or re.search(
+                r"\bUndefined name\s+[`'\"]([^`'\"]+)",
+                text,
+                re.I,
+            )
+            or re.search(
+                r"['\"]([A-Za-z_]\w*)['\"]\s+is not defined",
+                text,
+                re.I,
+            )
         )
 
-        if match:
-            name = match.group(1)
-            if name in seen_names:
-                continue
-            seen_names.add(name)
+        key = match.group(1).lower() if match else text.lower()
 
-        result.append(item)
+        if key not in seen:
+            seen.add(key)
+            unique.append(text)
 
-    return result
+    return unique
 
 def _empty_findings():
     return {
@@ -54,6 +64,7 @@ def _empty_findings():
         "type_errors": [],
         "runtime_errors": [],
         "logical_bugs": [],
+        "warnings": [],
         "explanation": "",
     }
 
@@ -65,10 +76,11 @@ def _as_list(value):
 
 
 def _add_finding(findings, category, message):
-    if category not in ERROR_CATEGORIES:
+    if category not in ERROR_CATEGORIES and category != "warnings":
         return
 
     message = str(message).strip()
+
     if message and message not in findings[category]:
         findings[category].append(message)
 
@@ -77,25 +89,42 @@ def _result(language, findings, analysis=None):
     normalized = _empty_findings()
 
     for category in ERROR_CATEGORIES:
-        normalized[category] = _as_list(findings.get(category, []))
+        normalized[category] = _as_list(
+            findings.get(category, [])
+        )
+
+    # Preserve warnings separately from errors.
+    normalized["warnings"] = _as_list(
+        findings.get("warnings", [])
+    )
 
     explanation = findings.get("explanation", "")
     normalized["explanation"] = (
-        explanation if isinstance(explanation, str) else str(explanation)
+        explanation if isinstance(explanation, str)
+        else str(explanation)
     )
 
-    has_errors = any(normalized[key] for key in ERROR_CATEGORIES)
+    has_errors = any(
+        normalized[key] for key in ERROR_CATEGORIES
+    )
+
     syntax_errors = normalized["syntax_errors"]
 
     return {
         "language": language,
         "has_syntax_error": bool(syntax_errors),
-        "syntax_error": "; ".join(map(str, syntax_errors)) if syntax_errors else None,
+        "syntax_error": (
+            "; ".join(map(str, syntax_errors))
+            if syntax_errors else None
+        ),
         "has_errors": bool(has_errors),
+        "error_count": sum(
+            len(normalized[key]) for key in ERROR_CATEGORIES
+        ),
+        "warning_count": len(normalized["warnings"]),
         "findings": normalized,
         "analysis": analysis or json.dumps(normalized, indent=2),
     }
-
 
 # ---------------------------------------------------------------------
 # Language detection
@@ -211,6 +240,183 @@ def validate_python_with_ruff(code: str) -> list[str]:
         return []
 
 
+def validate_python_with_pylint(code: str) -> list[tuple[str, str]]:
+    """Analyze Python code using Pylint and categorize diagnostics."""
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="codeassist_pylint_") as temp_dir:
+            file_path = os.path.join(temp_dir, "snippet.py")
+
+            with open(file_path, "w", encoding="utf-8") as file:
+                file.write(code)
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "pylint",
+                    "--output-format=json",
+                    "--score=n",
+                    "--reports=n",
+                    file_path,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+
+            # Pylint uses non-zero exit codes when it finds issues.
+            if result.returncode > 31 or not result.stdout.strip():
+                return []
+
+            diagnostics = json.loads(result.stdout)
+            findings = []
+
+            type_error_codes = {
+                "no-member",
+                "not-callable",
+                "unsubscriptable-object",
+                "unsupported-assignment-operation",
+                "unsupported-binary-operation",
+                "no-value-for-parameter",
+                "too-many-function-args",
+                "unexpected-keyword-arg",
+            }
+
+            logical_warning_codes = {
+                "unused-variable",
+                "unreachable",
+                "dangerous-default-value",
+                "redefined-builtin",
+                "unnecessary-pass",
+            }
+
+            for item in diagnostics:
+                symbol = item.get("symbol", "")
+                message = item.get("message", "")
+                line = item.get("line", "?")
+                error_type = item.get("type", "")
+
+                if symbol == "undefined-variable":
+                    category = "undefined_names"
+                    match = re.search(r"'([^']+)'", message)
+
+                    if match:
+                        name = match.group(1)
+                        diagnostic = (
+                            f"Name '{name}' is referenced but not defined. "
+                            f"(Line {line}, Pylint)"
+                        )
+                    else:
+                        diagnostic = f"Line {line}: {message} (Pylint)"
+
+                elif symbol == "syntax-error" or error_type == "fatal":
+                    category = "syntax_errors"
+                    diagnostic = f"Line {line}: {message} (Pylint)"
+
+                elif symbol in logical_warning_codes:
+                    category = "logical_bugs"
+                    diagnostic = f"Line {line}: {message} (Pylint: {symbol})."
+
+                else:
+                    continue
+
+                findings.append((category, diagnostic))
+
+            return findings
+
+    except (OSError, subprocess.TimeoutExpired, ValueError, json.JSONDecodeError):
+        return []
+
+
+def validate_python_with_pyright(code: str) -> list[tuple[str, str]]:
+    """Check Python type errors using Pyright."""
+
+    try:
+        with tempfile.TemporaryDirectory(
+            prefix="codeassist_pyright_"
+        ) as temp_dir:
+
+            file_path = os.path.join(temp_dir, "snippet.py")
+
+            with open(file_path, "w", encoding="utf-8") as file:
+                file.write(code)
+
+            pyright_path = shutil.which("pyright")
+
+            if not pyright_path:
+                candidate = os.path.join(
+                    os.path.dirname(sys.executable),
+                    "pyright.exe",
+                )
+                if os.path.isfile(candidate):
+                    pyright_path = candidate
+
+            if not pyright_path:
+                return []
+
+            result = subprocess.run(
+                [
+                    pyright_path,
+                    "--outputjson",
+                    file_path,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+
+            output = result.stdout.strip()
+
+            if not output:
+                return []
+
+            start = output.find("{")
+            end = output.rfind("}")
+
+            if start == -1 or end <= start:
+                return []
+
+            data = json.loads(output[start:end + 1])
+            findings = []
+
+            for item in data.get("generalDiagnostics", []):
+                if item.get("severity") != "error":
+                    continue
+
+                message = item.get("message", "")
+                rule = item.get("rule", "")
+
+                line = (
+                    item.get("range", {})
+                    .get("start", {})
+                    .get("line", 0) + 1
+                )
+
+                category = (
+                    "undefined_names"
+                    if rule == "reportUndefinedVariable"
+                    else "type_errors"
+                )
+
+                diagnostic = (
+                    f"Line {line}: {message} (Pyright: {rule})."
+                )
+
+                findings.append((category, diagnostic))
+
+            return findings
+
+    except (
+        OSError,
+        subprocess.TimeoutExpired,
+        ValueError,
+    ):
+        return []
+
+
 def validate_sql_with_sqlglot(code: str) -> list[str]:
     """Parse SQL without executing queries."""
     try:
@@ -278,6 +484,62 @@ def _python_undefined_names(code: str):
     inspect_scope(root)
     return sorted(undefined)
 
+def _detect_accumulation_mistakes(tree, findings):
+    """Detect possible overwriting instead of accumulating inside a loop."""
+
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.For, ast.AsyncFor)):
+            continue
+
+        if not isinstance(node.target, ast.Name):
+            continue
+
+        loop_variable = node.target.id
+
+        for statement in node.body:
+            if not isinstance(statement, ast.Assign):
+                continue
+
+            if len(statement.targets) != 1:
+                continue
+
+            target = statement.targets[0]
+
+            if not isinstance(target, ast.Name):
+                continue
+
+            total_variable = target.id
+
+            # Look for: total = loop_variable
+            if not (
+                isinstance(statement.value, ast.Name)
+                and statement.value.id == loop_variable
+            ):
+                continue
+
+            # Check whether total was initialized before the loop.
+            initialized = any(
+                isinstance(previous, ast.Assign)
+                and any(
+                    isinstance(t, ast.Name)
+                    and t.id == total_variable
+                    for t in previous.targets
+                )
+                and isinstance(previous.value, ast.Constant)
+                and isinstance(previous.value.value, (int, float))
+                for previous in tree.body
+                if previous.lineno < node.lineno
+            )
+
+            if initialized:
+                _add_finding(
+                    findings,
+                    "warnings",
+                    f"Line {statement.lineno}: '{total_variable}' "
+                    f"is overwritten inside the loop. If you intend "
+                    f"to calculate a cumulative total, use "
+                    f"'{total_variable} += {loop_variable}'.",
+                )
 
 def _python_static_checks(code: str):
     findings = _empty_findings()
@@ -424,9 +686,131 @@ def _python_static_checks(code: str):
                     "when the inputs differ. Check the comparison or use "
                     "max(a, b) for comparable values.",
                 )
-
+    _detect_accumulation_mistakes(tree, findings)
     return findings
 
+
+def validate_java_with_javac(code: str) -> dict:
+    """Compile Java code and collect categorized errors and warnings."""
+
+    findings = {
+        "errors": [],
+        "warnings": [],
+    }
+
+    try:
+        with tempfile.TemporaryDirectory(
+            prefix="codeassist_java_"
+        ) as temp_dir:
+
+            class_match = re.search(
+                r"\bpublic\s+(?:class|interface|enum|record)\s+([A-Za-z_$][\w$]*)",
+                code,
+            )
+
+            if not class_match:
+                class_match = re.search(
+                    r"\b(?:class|interface|enum|record)\s+([A-Za-z_$][\w$]*)",
+                    code,
+                )
+
+            class_name = (
+                class_match.group(1)
+                if class_match
+                else "CodeAssistSnippet"
+            )
+
+            file_path = os.path.join(temp_dir, f"{class_name}.java")
+
+            with open(file_path, "w", encoding="utf-8") as file:
+                file.write(code)
+
+            javac_path = shutil.which("javac")
+
+            if not javac_path:
+                possible_paths = [
+                    r"C:\Program Files\Eclipse Adoptium\jdk-21.0.13.9-hotspot\bin\javac.exe",
+                ]
+                javac_path = next(
+                    (path for path in possible_paths if os.path.isfile(path)),
+                    None
+                )
+
+            if not javac_path:
+                findings["warnings"].append(
+                    "JDK compiler not found. Check Java installation and PATH."
+                )
+                return findings
+
+            result = subprocess.run(
+                [javac_path, "-Xlint:all", "-XDrawDiagnostics", file_path],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+
+            output = result.stderr.strip()
+
+            for message in output.splitlines():
+
+                diagnostic = message.strip()
+
+                if not diagnostic:
+                    continue
+
+                # Ignore javac summary messages such as "1 error".
+                if re.fullmatch(r"\d+ errors?", diagnostic):
+                    continue
+
+                # Process only actual compiler diagnostics.
+                if "compiler.err." not in diagnostic and "compiler.warn." not in diagnostic:
+                    continue
+
+                # Determine error category using javac diagnostic codes.
+                if any(code in diagnostic for code in (
+                    "prob.found.req",
+                    "incompatible.types",
+                    "cant.apply.symbol",
+                    "cant.apply.diamond",
+                    "no suitable method",
+                )):
+                    category = "type_errors"
+
+                elif any(code in diagnostic for code in (
+                    "cant.resolve",
+                    "doesnt.exist",
+                )):
+                    category = "undefined_names"
+
+                elif any(code in diagnostic for code in (
+                    "expected",
+                    "illegal.start",
+                    "premature.eof",
+                    "unclosed",
+                    "reached.end",
+                )):
+                    category = "syntax_errors"
+
+                else:
+                    category = "syntax_errors"
+
+                # javac warning diagnostics are separate from errors.
+                if ": compiler.warn." in diagnostic:
+                    findings["warnings"].append(diagnostic)
+
+                else:
+                    findings["errors"].append(
+                        (category, diagnostic)
+                    )
+
+            return findings
+
+    except (OSError, subprocess.TimeoutExpired) as error:
+        findings["warnings"].append(
+            f"Java compiler could not complete: {error}"
+        )
+        return findings
 
 # ---------------------------------------------------------------------
 # Basic checks for Java, C, and C++
@@ -638,7 +1022,43 @@ def detect_errors(code: str) -> dict:
                     "logical_bugs",
                     f"Static analysis suggestion: {diagnostic}",
                 )
+        
+        # Additional Python analysis using Pylint
+        for category, diagnostic in validate_python_with_pylint(code):
 
+            # Avoid duplicate undefined-name reports
+            if category == "undefined_names":
+                if diagnostic in findings["undefined_names"]:
+                    continue
+
+            _add_finding(
+                findings,
+                category,
+                diagnostic
+            )
+        # Additional Python type checking using Pyright
+        # Additional Python type checking using Pyright
+        for category, diagnostic in validate_python_with_pyright(code):
+
+            normalized_diagnostic = diagnostic.lower()
+
+            already_detected = any(
+                "upper" in str(existing).lower()
+                and "int" in str(existing).lower()
+                for existing in findings[category]
+            )
+
+            if (
+                category == "type_errors"
+                and "upper" in normalized_diagnostic
+                and "int" in normalized_diagnostic
+                and already_detected
+            ):
+                continue
+
+            if diagnostic not in findings[category]:
+                _add_finding(findings, category, diagnostic)
+            
     elif language == "SQL":
         for message in validate_sql_with_sqlglot(code):
             _add_finding(findings, "syntax_errors", message)
@@ -648,23 +1068,42 @@ def detect_errors(code: str) -> dict:
             return _result(language, findings)
 
     elif language in ("Java", "C", "C++"):
-        basic_error = validate_balanced_delimiters(code, language)
+        if language == "Java":
+            java_results = validate_java_with_javac(code)
 
-        if not basic_error:
-            if language == "Java":
-                basic_error = validate_java_basics(code)
-            elif language == "C":
-                basic_error = validate_c_basics(code)
-            else:
-                basic_error = validate_cpp_basics(code)
+            for category, diagnostic in java_results["errors"]:
+                _add_finding(findings, category, diagnostic)
 
-        if basic_error:
-            _add_finding(findings, "syntax_errors", basic_error)
+            findings["warnings"].extend(java_results["warnings"])
+
+        else:
+            basic_error = validate_balanced_delimiters(code)
+
+            if not basic_error:
+                if language == "C":
+                    basic_error = validate_c_basics(code)
+                else:
+                    basic_error = validate_cpp_basics(code)
+
+            if basic_error:
+                _add_finding(
+                    findings,
+                    "syntax_errors",
+                    basic_error
+                )
 
     static_findings = {
         category: list(findings[category])
         for category in ERROR_CATEGORIES
     }
+    if language == "Python":
+        findings["undefined_names"] = deduplicate_undefined_names(
+            findings["undefined_names"]
+        )
+
+        static_findings["undefined_names"] = list(
+            findings["undefined_names"]
+        )
 
     prompt = f"""
 You are CodeAssist's programming error analysis agent.
@@ -714,6 +1153,10 @@ Code:
         # Merge AI findings, but do not let AI override
         # deterministic Python syntax or undefined-name checks.
         for category in ERROR_CATEGORIES:
+            if language == "Java":
+                continue
+            if language == "Python" and category == "logical_bugs":
+                continue
             if language == "Python" and category in (
                 "syntax_errors",
                 "undefined_names",
@@ -723,12 +1166,16 @@ Code:
             for value in model_findings[category]:
                 if language == "Python" and category == "logical_bugs":
                     text = value.lower()
-                    if (
-                        "undefined variable" in text
-                        or "undefined name" in text
-                        or "not been defined" in text
-                        or "has not been defined" in text
-                    ):
+
+                    if any(term in text for term in (
+                        "undefined variable",
+                        "undefined name",
+                        "not been defined",
+                        "has not been defined",
+                        "attribute is unknown",
+                        "cannot access attribute",
+                        "has no attribute",
+                    )):
                         continue
 
                 _add_finding(findings, category, value)
@@ -739,10 +1186,10 @@ Code:
             findings["syntax_errors"] = []
 
         # Preserve deterministic undefined-name findings and deduplicate.
-        findings["undefined_names"] = deduplicate_undefined_names(
-            static_findings["undefined_names"]
-        )
-
+        if language == "Python":
+            findings["undefined_names"] = deduplicate_undefined_names(
+                static_findings["undefined_names"]
+            )
         deterministic_parts = []
 
         for category in ERROR_CATEGORIES:

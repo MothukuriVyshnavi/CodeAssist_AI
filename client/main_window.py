@@ -787,18 +787,41 @@ class MainWindow(QMainWindow):
     def update_analysis_counts(self, result_text: str) -> None:
         """Update error and warning counts from analysis output."""
         import re
+        import json
 
-        error_count = len(re.findall(
-            r"(?im)^\s*(?:error|errors)\s*[:\-]",
+        error_count = 0
+        warning_count = 0
+
+        # First, read the counts from the report.
+        error_match = re.search(
+            r"(?im)^Error Count:\s*(\d+)\s*$",
             result_text
-        ))
-
-        warning_count = len(re.findall(
-            r"(?im)^\s*(?:warning|warnings)\s*[:\-]",
+        )
+        warning_match = re.search(
+            r"(?im)^Warning Count:\s*(\d+)\s*$",
             result_text
-        ))
+        )
 
-        self.error_count_label.setText(f"{error_count} Error")
+        if error_match:
+            error_count = int(error_match.group(1))
+
+        if warning_match:
+            warning_count = int(warning_match.group(1))
+
+        # Also inspect the JSON findings for actual warnings.
+        warnings_match = re.search(
+            r'"warnings"\s*:\s*(\[[\s\S]*?\])',
+            result_text
+        )
+
+        if warnings_match:
+            try:
+                warnings = json.loads(warnings_match.group(1))
+                warning_count = max(warning_count, len(warnings))
+            except json.JSONDecodeError:
+                pass
+
+        self.error_count_label.setText(f"{error_count} Errors")
         self.warning_count_label.setText(f"{warning_count} Warnings")
 
     def _create_mic_icon(self) -> QPixmap:
@@ -1156,21 +1179,7 @@ class MainWindow(QMainWindow):
             self.output_box.setPlainText(result_text)
             self.update_analysis_counts(result_text)
 
-            error_match = re.search(
-                r"(?m)^Error Count:\s*(\d+)\s*$",
-                result_text,
-            )
-
-            warning_match = re.search(
-                r"(?m)^Warning Count:\s*(\d+)\s*$",
-                result_text,
-            )
-
-            error_count = int(error_match.group(1)) if error_match else 0
-            warning_count = int(warning_match.group(1)) if warning_match else 0
-
-            self.error_count_label.setText(f"{error_count} Errors")
-            self.warning_count_label.setText(f"{warning_count} Warnings")
+            self.update_analysis_counts(result_text)
 
             self.set_controls_enabled(True)
 
