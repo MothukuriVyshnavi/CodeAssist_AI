@@ -440,6 +440,308 @@ def validate_sql_with_sqlglot(code: str) -> list[str]:
         return []
 
 
+
+def validate_c_with_gcc(code: str) -> dict:
+    """Analyze C code using GCC, Cppcheck and Clang without execution."""
+
+    result = {
+        "syntax_errors": [],
+        "undefined_names": [],
+        "type_errors": [],
+        "runtime_errors": [],
+        "logical_bugs": [],
+        "warnings": []
+    }
+
+    source_file = None
+    object_file = None
+
+    def find_tool(name, possible_paths):
+        path = shutil.which(name)
+
+        if path:
+            return path
+
+        for candidate in possible_paths:
+            if os.path.isfile(candidate):
+                return candidate
+
+        return None
+
+    gcc_path = find_tool("gcc", [
+        r"C:\msys64\ucrt64\bin\gcc.exe",
+        r"C:\msys64\mingw64\bin\gcc.exe",
+        r"C:\msys64\mingw32\bin\gcc.exe",
+    ])
+
+    cppcheck_path = find_tool("cppcheck", [
+        r"C:\Program Files\Cppcheck\cppcheck.exe",
+    ])
+
+    clang_path = find_tool("clang", [
+        r"C:\Program Files\LLVM\bin\clang.exe",
+    ])
+
+    def add_unique(category, message):
+        message = message.strip()
+
+        if message and message not in result[category]:
+            _add_finding(result, category, message)
+
+    def classify_diagnostic(message):
+        msg = message.lower()
+
+        # Cppcheck diagnostic IDs
+        runtime_ids = (
+            "nullpointer", "nullpointerarithmetic",
+            "memleak", "memleakconst", "useafterfree", "deallocuse",
+            "doublefree",
+            "arrayindexoutofbounds", "zerodiv",
+            "uninitvar", "uninitdata",
+            "invalidscanf", "invalidread", "invalidwrite"
+        )
+
+        logical_ids = (
+            "zerodiv", "wrongcondition",
+            "duplicatebranch", "unreachablecode",
+            "redundantassignment"
+        )
+
+        diagnostic_id = ""
+        match = re.search(r"\[([a-zA-Z0-9_]+)\]", msg)
+
+        if match:
+            diagnostic_id = match.group(1)
+
+        if any(item in diagnostic_id for item in runtime_ids):
+            return "runtime_errors"
+
+        if any(item in diagnostic_id for item in logical_ids):
+            return "logical_bugs"
+
+        if "syntaxerror" in diagnostic_id:
+            return "syntax_errors"
+
+        if any(term in msg for term in (
+            "undeclared", "not declared",
+            "undefined name", "unknown identifier"
+        )):
+            return "undefined_names"
+
+        if any(term in msg for term in (
+            "incompatible type", "incompatible pointer",
+            "invalid operands", "conflicting types",
+            "int-conversion", "pointer from integer",
+            "makes integer from pointer",
+            "format specifies"
+        )):
+            return "type_errors"
+
+        if any(term in msg for term in (
+            "division by zero", "divide by zero",
+            "double free", "freed twice",
+            "null pointer", "null dereference",
+            "out of bounds", "buffer overflow",
+            "use after free", "use-after-free",
+            "uninitialized value", "uninitialized variable",
+            "memory leak", "invalid read", "invalid write",
+            "nullpointer", "memleak", "uninitvar"
+        )):
+            return "runtime_errors"
+
+        if any(term in msg for term in (
+            "always true", "always false",
+            "condition is redundant", "unreachable code",
+            "redundant assignment"
+        )):
+            return "logical_bugs"
+
+        if "error:" in msg or "fatal error:" in msg:
+            return "syntax_errors"
+
+        return "warnings"
+
+    def process_output(output, source_only=False):
+        output = output or ""
+
+        for line in output.splitlines():
+            message = line.strip()
+
+            if not message:
+                continue
+
+            # Ignore diagnostics originating from system headers.
+            if source_only and source_file.lower() not in message.lower():
+                continue
+
+            if any(level in message.lower() for level in (
+                "error:", "warning:", "fatal error:"
+            )):
+                category = classify_diagnostic(message)
+                add_unique(category, message)
+
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            suffix=".c",
+            encoding="utf-8",
+            delete=False
+        ) as temp_file:
+            temp_file.write(code)
+            source_file = temp_file.name
+
+        # 1. GCC compilation and static analysis
+        if gcc_path:
+            with tempfile.NamedTemporaryFile(
+                suffix=".o", delete=False
+            ) as temp_object:
+                object_file = temp_object.name
+
+            try:
+                gcc_process = subprocess.run(
+                    [
+                        gcc_path,
+                        "-std=c11",
+                        "-Wall",
+                        "-Wextra",
+                        "-Wpedantic",
+                        "-Wformat=2",
+                        "-Wuninitialized",
+                        "-Wmaybe-uninitialized",
+                        "-Wdiv-by-zero",
+                        "-fanalyzer",
+                        "-O1",
+                        "-c",
+                        source_file,
+                        "-o",
+                        object_file
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=30
+                )
+
+                process_output(gcc_process.stderr)
+
+            except subprocess.TimeoutExpired:
+                add_unique("warnings", "GCC analysis timed out.")
+
+        else:
+            add_unique("warnings", "GCC executable not found.")
+
+        # 2. Cppcheck static analysis
+        if cppcheck_path:
+            try:
+                cppcheck_process = subprocess.run(
+                    [
+                        cppcheck_path,
+                        "--enable=warning,style,performance,portability",
+                        "--template=gcc",
+                        "--quiet",
+                        source_file
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=30
+                )
+
+                process_output(cppcheck_process.stderr)
+                process_output(cppcheck_process.stdout)
+
+            except subprocess.TimeoutExpired:
+                add_unique("warnings", "Cppcheck analysis timed out.")
+
+        else:
+            add_unique("warnings", "Cppcheck executable not found.")
+
+        # 3. Clang Static Analyzer
+        
+        # 3. Clang Static Analyzer
+        if clang_path:
+            try:
+                clang_command = [
+                    clang_path,
+                    "--analyze",
+                    "-Xanalyzer",
+                    "-analyzer-output=text",
+                ]
+
+                # Use GCC's system include directories when available.
+                if gcc_path:
+                    gcc_include_process = subprocess.run(
+                        [gcc_path, "-E", "-v", "-x", "c", "-"],
+                        input="",
+                        capture_output=True,
+                        text=True,
+                        timeout=15
+                    )
+
+                    include_output = (
+                        (gcc_include_process.stderr or "")
+                        + (gcc_include_process.stdout or "")
+                    )
+
+                    inside_include_section = False
+
+                    for line in include_output.splitlines():
+                        line = line.strip()
+
+                        if "#include <...> search starts here:" in line:
+                            inside_include_section = True
+                            continue
+
+                        if "End of search list." in line:
+                            inside_include_section = False
+                            continue
+
+                        if inside_include_section and line:
+                            include_dir = line.replace(" (framework directory)", "")
+
+                            if os.path.isdir(include_dir):
+                                clang_command.extend([
+                                    "-isystem",
+                                    include_dir
+                                ])
+
+                clang_command.append(source_file)
+
+                clang_process = subprocess.run(
+                    clang_command,
+                    capture_output=True,
+                    text=True,
+                    timeout=30
+                )
+
+                process_output(clang_process.stderr, source_only=True)
+                process_output(clang_process.stdout, source_only=True)
+
+            except subprocess.TimeoutExpired:
+                add_unique("warnings", "Clang analysis timed out.")
+
+            except Exception as exc:
+                add_unique(
+                    "warnings",
+                    f"Clang analysis failed: {exc}"
+                )
+
+        else:
+            add_unique("warnings", "Clang executable not found.")
+
+    except Exception as exc:
+        add_unique("warnings", f"C analysis failed: {exc}")
+
+    finally:
+        for path in (source_file, object_file):
+            if path and os.path.exists(path):
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+
+    return result
+
+
+
 # ---------------------------------------------------------------------
 # Python static analysis
 # ---------------------------------------------------------------------
@@ -937,34 +1239,85 @@ def validate_balanced_delimiters(code: str, language: str):
 # LLM response parsing
 # ---------------------------------------------------------------------
 
+
 def _parse_model_json(response):
+    """Extract and safely parse a JSON object from model output."""
+
     if not isinstance(response, str):
-        raise ValueError("The analysis service returned a non-text response.")
+        raise ValueError(
+            "The analysis service returned a non-text response."
+        )
 
     text = response.strip()
 
-    if text.startswith("```"):
-        text = re.sub(
-            r"^```(?:json)?\s*",
-            "",
-            text,
-            count=1,
-            flags=re.IGNORECASE,
-        )
-        text = re.sub(r"\s*```$", "", text, count=1)
+    if not text:
+        raise ValueError("The model returned an empty response.")
 
+    # Remove Markdown code fences.
+    text = re.sub(
+        r"^\s*```(?:json)?\s*",
+        "",
+        text,
+        count=1,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(
+        r"\s*```\s*$",
+        "",
+        text,
+        count=1,
+    )
+
+    # Find the JSON object.
     start = text.find("{")
-    end = text.rfind("}")
 
-    if start < 0 or end <= start:
+    if start < 0:
         raise ValueError("The model did not return a JSON object.")
 
-    data = json.loads(text[start:end + 1])
+    # Find the matching closing brace while respecting JSON strings.
+    depth = 0
+    in_string = False
+    escaped = False
+    end = -1
+
+    for index in range(start, len(text)):
+        char = text[index]
+
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+
+        if char == '"':
+            in_string = True
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+
+            if depth == 0:
+                end = index
+                break
+
+    if end < 0:
+        raise ValueError("The model returned an incomplete JSON object.")
+
+    try:
+        data = json.loads(text[start:end + 1])
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            f"The model returned invalid JSON: {exc}"
+        ) from exc
 
     if not isinstance(data, dict):
         raise ValueError("Expected a JSON object.")
 
     return data
+
 
 
 def _normalize_model_findings(model_findings):
@@ -1067,30 +1420,74 @@ def detect_errors(code: str) -> dict:
             findings["explanation"] = "; ".join(findings["syntax_errors"])
             return _result(language, findings)
 
-    elif language in ("Java", "C", "C++"):
-        if language == "Java":
-            java_results = validate_java_with_javac(code)
+    
+    
+    elif language == "Java":
+        java_results = validate_java_with_javac(code)
 
-            for category, diagnostic in java_results["errors"]:
-                _add_finding(findings, category, diagnostic)
+        for category, diagnostic in java_results["errors"]:
+            _add_finding(findings, category, diagnostic)
 
-            findings["warnings"].extend(java_results["warnings"])
+        findings["warnings"].extend(
+            java_results["warnings"]
+        )
 
-        else:
-            basic_error = validate_balanced_delimiters(code)
+    elif language == "C":
+        c_results = validate_c_with_gcc(code)
 
-            if not basic_error:
-                if language == "C":
-                    basic_error = validate_c_basics(code)
-                else:
-                    basic_error = validate_cpp_basics(code)
+        for category, messages in c_results.items():
+            for message in messages:
 
-            if basic_error:
-                _add_finding(
-                    findings,
-                    "syntax_errors",
-                    basic_error
+                # Normalize the diagnostic message.
+                normalized = re.sub(
+                    r"\s+",
+                    " ",
+                    str(message).strip()
+                ).lower()
+
+                # Normalize spaces inside diagnostic IDs.
+                normalized = re.sub(
+                    r"\[\s*([a-zA-Z0-9_]+)\s*\]",
+                    r"[\1]",
+                    normalized
                 )
+
+                duplicate = False
+
+                for existing in findings[category]:
+                    existing_normalized = re.sub(
+                        r"\s+",
+                        " ",
+                        str(existing).strip()
+                    ).lower()
+
+                    existing_normalized = re.sub(
+                        r"\[\s*([a-zA-Z0-9_]+)\s*\]",
+                        r"[\1]",
+                        existing_normalized
+                    )
+
+                    if normalized == existing_normalized:
+                        duplicate = True
+                        break
+
+                if not duplicate:
+                    _add_finding(findings, category, message)
+
+    elif language == "C++":
+        basic_error = validate_balanced_delimiters(
+            code, language
+        )
+
+        if not basic_error:
+            basic_error = validate_cpp_basics(code)
+
+        if basic_error:
+            _add_finding(
+                findings,
+                "syntax_errors",
+                basic_error
+            )
 
     static_findings = {
         category: list(findings[category])
@@ -1142,44 +1539,58 @@ Existing validator findings:
 Code:
 {code}
 """
-
-    
     try:
         raw = ask_ai(prompt)
-        model_findings = _normalize_model_findings(
-            _parse_model_json(raw)
-        )
+        parsed_data = _parse_model_json(raw)
 
-        # Merge AI findings, but do not let AI override
-        # deterministic Python syntax or undefined-name checks.
+        model_findings = _normalize_model_findings(parsed_data)
+        # Merge AI findings carefully.
+        # Preserve deterministic compiler findings for C and Java.
+
         for category in ERROR_CATEGORIES:
+
             if language == "Java":
                 continue
-            if language == "Python" and category == "logical_bugs":
-                continue
+
+            # Python syntax and undefined names are checked
+            # by deterministic validators.
             if language == "Python" and category in (
                 "syntax_errors",
                 "undefined_names",
+                "logical_bugs",
+            ):
+                continue
+
+            # For C, GCC is authoritative for compilation errors.
+            # Do not let AI introduce or duplicate compiler findings.
+            if language == "C" and category in (
+                "syntax_errors",
+                "undefined_names",
+                "type_errors",
+                "logical_bugs",
             ):
                 continue
 
             for value in model_findings[category]:
-                if language == "Python" and category == "logical_bugs":
-                    text = value.lower()
 
-                    if any(term in text for term in (
-                        "undefined variable",
-                        "undefined name",
-                        "not been defined",
-                        "has not been defined",
-                        "attribute is unknown",
-                        "cannot access attribute",
-                        "has no attribute",
-                    )):
+                # Avoid adding findings already reported by validators.
+                normalized_value = value.strip().lower()
+
+                existing_values = [
+                    item.strip().lower()
+                    for item in findings[category]
+                ]
+
+                if normalized_value in existing_values:
+                    continue
+
+                # Do not accept unsupported runtime claims for C
+                # without evidence in the deterministic findings.
+                if language == "C" and category == "runtime_errors":
+                    if not static_findings["runtime_errors"]:
                         continue
 
                 _add_finding(findings, category, value)
-
 
         if language == "Python":
             # Python AST parsing is authoritative for syntax.
@@ -1224,4 +1635,3 @@ Code:
         )
 
     return _result(language, findings)
-

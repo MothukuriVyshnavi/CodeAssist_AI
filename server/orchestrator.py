@@ -35,26 +35,8 @@ def process_command(command: str, code: str = "") -> str:
 
         findings = detection.get("findings", {})
 
-        error_categories = [
-            "syntax_errors",
-            "undefined_names",
-            "type_errors",
-            "runtime_errors",
-        ]
-
-        warning_categories = [
-            "logical_bugs",
-        ]
-
-        error_count = sum(
-            len(findings.get(category, []))
-            for category in error_categories
-        )
-
-        warning_count = sum(
-        len(findings.get(category, []))
-            for category in warning_categories
-        )
+        error_count = detection.get("error_count", 0)
+        warning_count = detection.get("warning_count", 0)
 
         output.extend([
             "ERROR DETECTION AGENT",

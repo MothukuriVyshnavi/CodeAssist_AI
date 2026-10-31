@@ -316,7 +316,33 @@ class AnalysisWorker(QThread):
                     f"Adapter exited with code {completed.returncode}."
                 )
 
-            payload = json.loads(completed.stdout)
+            # Check whether the adapter returned any output.
+            output = completed.stdout.strip()
+
+            if not output:
+                raise RuntimeError(
+                    "The harness adapter returned empty output. "
+                    "Check the adapter execution and error logs."
+                )
+
+            # Convert adapter output into JSON safely.
+            try:
+                payload = json.loads(output)
+
+            except json.JSONDecodeError as error:
+                raise RuntimeError(
+                    "The harness adapter returned invalid JSON.\n"
+                    f"JSON error: {error}\n"
+                    f"Adapter output: {output[:1500]}\n"
+                    f"Adapter stderr: {completed.stderr[:1500]}"
+                ) from error
+
+            # Validate the returned JSON structure.
+            if not isinstance(payload, dict):
+                raise RuntimeError(
+                    "The harness adapter returned an unexpected JSON format."
+                )
+
             if not payload.get("ok"):
                 raise RuntimeError(
                     payload.get("error", "The adapter reported an error.")
@@ -1170,49 +1196,67 @@ class MainWindow(QMainWindow):
         self,
         result_text: str,
         corrected_code: str,
-        ) -> None:
-            import re
+    ) -> None:
 
-            self.set_mic_state("success")
+        self.set_mic_state("success")
 
-            result_text = result_text or "The analysis returned no text."
-            self.output_box.setPlainText(result_text)
-            self.update_analysis_counts(result_text)
+        result_text = result_text or "The analysis returned no text."
 
-            self.update_analysis_counts(result_text)
+        # Find the existing results widget
+        output_widget = getattr(self, "output_box", None)
 
+        if output_widget is None:
+            output_widget = getattr(self, "analysis_output", None)
+
+        if output_widget is None:
+            output_widget = getattr(self, "results_text", None)
+
+        if output_widget is None:
+            self.status_label.setText(
+                "Error: Analysis output widget was not found."
+            )
             self.set_controls_enabled(True)
+            return
 
-            if corrected_code:
-                self._pending_corrected_code = corrected_code
+        # Display analysis results
+        output_widget.setPlainText(result_text)
 
-                self.status_label.setText(
-                    "Correction found. Waiting for spoken approval: "
-                    "say APPLY or CANCEL."
-                )
+        # Update error and warning counts
+        self.update_analysis_counts(result_text)
 
-                self.output_box.append(
-                    "\n\nCORRECTED CODE\n"
-                    + corrected_code
-                    + "\n\nWaiting for your spoken approval to load the correction."
-                )
+        self.set_controls_enabled(True)
 
+        if corrected_code:
+            self._pending_corrected_code = corrected_code
 
-                self._approval_worker = ApprovalWorker()
+            self.status_label.setText(
+                "Correction found. Waiting for spoken approval: "
+                "say APPLY or CANCEL."
+            )
 
-                self._approval_worker.completed.connect(
-                    self.handle_approval_result
-                )
-                self._approval_worker.failed.connect(
-                    self.handle_approval_failed
-                )
+            output_widget.append(
+                "\n\nCORRECTED CODE\n"
+                + corrected_code
+                + "\n\nWaiting for your spoken approval to load the correction."
+            )
 
-                self._approval_worker.start()
+            self._approval_worker = ApprovalWorker()
 
-            else:
-                self.status_label.setText(
-                    "Analysis complete. No explicitly marked corrected code was found."
-                )
+            self._approval_worker.completed.connect(
+                self.handle_approval_result
+            )
+
+            self._approval_worker.failed.connect(
+                self.handle_approval_failed
+            )
+
+            self._approval_worker.start()
+
+        else:
+            self.status_label.setText(
+                "Analysis complete. No explicitly marked corrected code was found."
+            )
+
 
     def handle_analysis_failed(self, error_message: str) -> None:
         self.output_box.append(
